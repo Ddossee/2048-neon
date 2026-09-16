@@ -284,9 +284,11 @@
   .wordmark {
     font-weight: 800; letter-spacing: -.035em; line-height: .88;
     font-size: clamp(46px, 17vw, 80px);
-    background: linear-gradient(104deg, var(--accent), var(--accent-deep));
+    background: linear-gradient(92deg, #00E5FF 0%, #B79DFF 48%, #FF3DB8 100%);
     -webkit-background-clip: text; background-clip: text; color: transparent;
-    filter: drop-shadow(0 0 18px rgba(0,229,255,.35));
+    filter: drop-shadow(0 0 3px rgba(255,255,255,.6))
+            drop-shadow(0 0 22px rgba(183,157,255,.55))
+            drop-shadow(0 0 42px rgba(0,229,255,.35));
   }
   .screen h2 { margin: 0; font-size: clamp(19px, 5.4vw, 26px); font-weight: 700; letter-spacing: -.02em; }
   /* «Закрыть» и «Назад» тоже контейнеры, а не висящий текст */
@@ -486,19 +488,19 @@ const CONFIG = {
   fontScale: { 3: 1.35, 4: 1, 5: 0.78 },
   saveKey: 'game2048.neon.v3',
   tiles: {
-    2:    { bg: '#343D52', ink: '#E4ECFA', glow: 0    },
-    4:    { bg: '#465A85', ink: '#F0F6FF', glow: 0.06 },
-    8:    { bg: '#12A2BC', ink: '#04252C', glow: 0.22 },
-    16:   { bg: '#00C9E6', ink: '#03222A', glow: 0.36 },
-    32:   { bg: '#00E5FF', ink: '#032027', glow: 0.48 },
-    64:   { bg: '#3D8BFF', ink: '#F4F9FF', glow: 0.58 },
-    128:  { bg: '#6E5BFF', ink: '#F5F3FF', glow: 0.66 },
-    256:  { bg: '#A03BFF', ink: '#FAF1FF', glow: 0.72 },
-    512:  { bg: '#DC2BFF', ink: '#FEF2FF', glow: 0.80 },
-    1024: { bg: '#FF2D9B', ink: '#FFF0F7', glow: 0.88 },
-    2048: { bg: '#FF6A3A', ink: '#2A0B03', glow: 0.94 },
-    4096: { bg: '#FFB020', ink: '#2A1C03', glow: 0.97 },
-    high: { bg: '#FFE24D', ink: '#2A2403', glow: 1.00 }
+    2:    { bg: '#2F7BFF', ink: '#F2F6FF', glow: 0.35 },
+    4:    { bg: '#00B8FF', ink: '#06232B', glow: 0.44 },
+    8:    { bg: '#00E5FF', ink: '#032027', glow: 0.52 },
+    16:   { bg: '#00FFE0', ink: '#032A26', glow: 0.60 },
+    32:   { bg: '#6E5BFF', ink: '#F5F3FF', glow: 0.66 },
+    64:   { bg: '#9B3BFF', ink: '#FAF1FF', glow: 0.72 },
+    128:  { bg: '#C22BFF', ink: '#FEF2FF', glow: 0.78 },
+    256:  { bg: '#E620D8', ink: '#FFF0FA', glow: 0.84 },
+    512:  { bg: '#FF1FA3', ink: '#FFF0F5', glow: 0.88 },
+    1024: { bg: '#FF2D6A', ink: '#FFF0F2', glow: 0.92 },
+    2048: { bg: '#FF4D2D', ink: '#2A0B03', glow: 0.95 },
+    4096: { bg: '#FF9B1A', ink: '#2A1B03', glow: 0.98 },
+    high: { bg: '#FFD91A', ink: '#2A2503', glow: 1.00 }
   },
   sound: {
     move:  { freq: 220, to: 180, dur: 0.07, gain: 0.055, type: 'triangle' },
