@@ -178,9 +178,12 @@
   /* ---- поле ---- */
   #stage { flex: 1 1 auto; width: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; }
   #board {
-    position: relative; height: 100%;
-    max-height: min(100%, 560px); max-width: 100%;
+    position: relative;
+    /* точную сторону ставит JS: min(доступная ширина, доступная высота).
+       aspect-ratio с width — страховка на случай, если JS не успел отработать. */
     aspect-ratio: 1 / 1;
+    width: min(100%, 560px);
+    flex: 0 0 auto;
     --gap: 3.2%;
     --n: 4;
     --cell: calc((100% - var(--gap) * (var(--n) + 1)) / var(--n));
@@ -282,6 +285,9 @@
     scrollbar-gutter: stable both-edges;
   }
   .screen.show { opacity: 1; visibility: visible; pointer-events: auto; transform: scale(1); }
+  /* на стартовом экране заголовок должен дышать отдельно от блока кнопок */
+  #start .wordmark { margin-bottom: var(--s5); }
+  #start .primary { margin-bottom: var(--s2); }
   .wordmark {
     font-weight: 800; letter-spacing: -.035em; line-height: .88;
     font-size: clamp(46px, 17vw, 80px);
@@ -768,6 +774,7 @@ function shade(hex, amt) {
 }
 
 function buildCells() {
+  fitBoard();
   board.querySelectorAll('.cell').forEach(el => el.remove());
   board.style.setProperty('--n', N);
   board.style.setProperty('--fs', (9 * (CONFIG.fontScale[N] || 1)).toFixed(2) + 'cqw');
@@ -783,6 +790,29 @@ function place(el, r, c) {
   el.style.left = `calc(var(--gap) + var(--step) * ${c})`;
   el.style.top  = `calc(var(--gap) + var(--step) * ${r})`;
 }
+
+/* Поле обязано быть строго квадратным: клетки внутри позиционируются в процентах,
+   поэтому любое расхождение сторон превращает их в прямоугольники.
+   CSS с aspect-ratio это не гарантирует, когда высота и ширина ограничены
+   одновременно, — считаем сторону сами по меньшему измерению. */
+function fitBoard() {
+  const stage = document.getElementById('stage');
+  if (!stage) return;
+  const cs = getComputedStyle(stage);
+  const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+  const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const w = stage.clientWidth - padX;
+  const h = stage.clientHeight - padY;
+  const side = Math.floor(Math.max(0, Math.min(w, h, 560)));
+  if (!side) return;
+  board.style.width = side + 'px';
+  board.style.height = side + 'px';
+}
+
+// пересчитываем при любом изменении геометрии: поворот, смена размера, адресная строка
+window.addEventListener('resize', fitBoard);
+window.addEventListener('orientationchange', () => setTimeout(fitBoard, 120));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', fitBoard);
 
 function paintEl(el, value) {
   const s = styleOf(value);
@@ -1182,6 +1212,8 @@ async function load() {
   pendingRun = (data && validRun(data.run)) ? data.run : null;
   if (!seenTutorial) showTutorial('start');
   else showStart();
+  fitBoard();                                  // после отрисовки: высота шапки и дока уже учтена
+  requestAnimationFrame(fitBoard);             // и ещё раз в следующем кадре, когда шрифты встали
   gemBridge.ready();            // интерфейс отрисован — сообщаем платформе, что мини-апп готов
 }
 
