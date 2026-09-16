@@ -279,6 +279,7 @@
     transform: scale(.99);
     transition: opacity .18s var(--ease), transform .18s var(--ease), visibility .18s;
     overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y;
+    scrollbar-gutter: stable both-edges;
   }
   .screen.show { opacity: 1; visibility: visible; pointer-events: auto; transform: scale(1); }
   .wordmark {
@@ -409,7 +410,6 @@
     <div id="board">
       <div class="screen" id="start">
         <div class="wordmark">2048</div>
-        <p id="start-sub">Сдвигай плитки, складывай одинаковые</p>
         <button class="primary" id="btn-play">Играть</button>
         <div class="row">
           <button id="btn-continue" style="display:none">Продолжить партию</button>
@@ -1013,7 +1013,6 @@ function showOverlay(title, text, btn, onClick, altLabel, onAlt, trophyValue) {
 function showStart() {
   state = 'menu';
   $('btn-continue').style.display = pendingRun ? '' : 'none';
-  $('start-sub').textContent = M.name + ' · ' + M.desc;
   hideAll();
   screens.start.classList.add('show');
   updateHud();
