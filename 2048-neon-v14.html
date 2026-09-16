@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#07070B">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>2048</title>
+<style>
+  /* ============ ТОКЕНЫ ============ */
+  :root {
+    /* фон и поверхности */
+    --bg: #07070B;
+    --surface: rgba(255,255,255,.035);
+    --surface-2: rgba(255,255,255,.06);
+    --line: rgba(138,146,166,.26);
+    --line-strong: rgba(138,146,166,.42);
+
+    /* один акцент на весь интерфейс */
+    --accent: #00E5FF;
+    --accent-deep: #6A3BFF;
+
+    /* текст */
+    --text: #EEF3FF;
+    --text-dim: #8A92A6;
+    --ink: #06060A;
+
+    /* шкала отступов, 4pt */
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+
+    /* радиусы: крупная поверхность → мягче, мелкий элемент → жёстче */
+    --r-board: 18px;
+    --r-tile: 10px;
+    --r-ctl: 12px;
+
+    --tap: 48px;
+    --font-sub: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --ease: cubic-bezier(.22,.61,.36,1);
+    /* переопределяются из bridge.app.init(), если игра открыта внутри Gem Space */
+    --gem-safe-top: 0px;
+    --gem-safe-bottom: 0px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    height: 100%; height: 100dvh;
+    overflow: hidden; overscroll-behavior: none;
+    background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    font-size: 16px;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    touch-action: none;
+  }
+  /* фон: базовый градиент + два медленно дрейфующих пятна света */
+  body::before {
+    content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      linear-gradient(160deg, #0B1220 0%, var(--bg) 42%, #0E0A1C 100%),
+      var(--bg);
+  }
+  .glow {
+    position: fixed; z-index: 0; pointer-events: none;
+    width: 70vmax; height: 70vmax; border-radius: 50%;
+    filter: blur(60px);
+    will-change: transform;
+    animation: drift 22s ease-in-out infinite alternate;
+  }
+  .glow.a {
+    left: -28vmax; top: -30vmax;
+    background: radial-gradient(circle, rgba(0,229,255,.32), rgba(0,229,255,0) 62%);
+  }
+  .glow.b {
+    right: -30vmax; bottom: -32vmax;
+    background: radial-gradient(circle, rgba(106,59,255,.38), rgba(106,59,255,0) 62%);
+    animation-delay: -11s;
+  }
+  @keyframes drift {
+    from { transform: translate(0, 0) scale(1); }
+    to   { transform: translate(9vmax, 6vmax) scale(1.12); }
+  }
+  @media (prefers-reduced-motion: reduce) { .glow { animation: none; } }
+  body::after {
+    content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    opacity: .045; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/></filter><rect width='120' height='120' filter='url(%23n)'/></svg>");
+  }
+
+  #app {
+    position: relative; z-index: 1; height: 100%;
+    display: flex; flex-direction: column; align-items: center;
+    padding: calc(max(env(safe-area-inset-top), var(--gem-safe-top)) + var(--s3))
+             calc(env(safe-area-inset-right) + var(--s3))
+             calc(max(env(safe-area-inset-bottom), var(--gem-safe-bottom)) + var(--s2))
+             calc(env(safe-area-inset-left) + var(--s3));
+    gap: var(--s3);
+  }
+
+  /* ---- шапка: приоритет у счёта, не у логотипа ---- */
+  header {
+    width: 100%; max-width: 460px;
+    display: flex; align-items: center; gap: var(--s3);
+  }
+  .mark {
+    font-size: 24px; font-weight: 800; letter-spacing: -.01em;
+    color: var(--text); opacity: .9;
+  }
+  .mark small {
+    display: block; font-family: var(--font-sub);
+    font-size: 9px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--text-dim); margin-top: 1px;
+  }
+  .scores { margin-left: auto; display: flex; gap: var(--s2); }
+  .score { text-align: right; min-width: 60px; }
+  .score span {
+    display: block; font-family: var(--font-sub);
+    font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-dim);
+  }
+  .score b {
+    display: block; font-size: 19px; font-weight: 700;
+    font-variant-numeric: tabular-nums; letter-spacing: -.01em;
+    transition: transform .18s var(--ease), color .18s var(--ease);
+  }
+  .score b.bump { transform: scale(1.14); color: var(--accent); }
+
+  /* прогресс к цели: видно, насколько близко, без чтения цифр */
+  .progress {
+    width: 100%; max-width: 460px; height: 3px;
+    border-radius: 2px; overflow: hidden;
+    background: rgba(255,255,255,.055);
+    margin-top: calc(var(--s3) * -1 + 2px);
+  }
+  .progress i {
+    display: block; height: 100%; width: 0;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-deep));
+    box-shadow: 0 0 10px rgba(0,229,255,.45);
+    transition: width .35s var(--ease);
+  }
+
+  /* ---- кнопки ---- */
+  button {
+    font: inherit; font-size: 14px; font-weight: 600; color: var(--text);
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-ctl);
+    min-height: var(--tap); padding: 0 var(--s4); cursor: pointer;
+    transition: transform .12s var(--ease), border-color .16s, background .16s, opacity .16s;
+  }
+  button:active:enabled { transform: scale(.97); background: var(--surface-2); border-color: var(--line-strong); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button[disabled] { opacity: .3; cursor: default; }
+  @media (hover: hover) and (pointer: fine) {
+    button:hover:enabled { border-color: var(--line-strong); background: var(--surface-2); }
+  }
+  .primary {
+    border-color: transparent; color: var(--ink);
+    background: linear-gradient(100deg, var(--accent), var(--accent-deep));
+    box-shadow: 0 6px 24px rgba(0,229,255,.22);
+    font-size: 17px; min-height: 54px; padding: 0 var(--s6);
+  }
+  /* при наведении и нажатии градиент остаётся, только усиливается свечение */
+  .primary:active:enabled {
+    color: var(--ink); border-color: transparent;
+    background: linear-gradient(100deg, var(--accent), var(--accent-deep));
+    box-shadow: 0 4px 16px rgba(0,229,255,.3);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .primary:hover:enabled {
+      color: var(--ink); border-color: transparent;
+      background: linear-gradient(100deg, #33EBFF, #7F55FF);
+      box-shadow: 0 8px 32px rgba(0,229,255,.4);
+    }
+  }
+  .quiet { background: transparent; border-color: transparent; color: var(--text-dim); }
+  .quiet:active:enabled { color: var(--text); background: var(--surface); }
+  .danger { color: #FF8A9B; }
+
+  /* ---- поле ---- */
+  #stage { flex: 1 1 auto; width: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  #board {
+    position: relative; height: 100%;
+    max-height: min(100%, 560px); max-width: 100%;
+    aspect-ratio: 1 / 1;
+    --gap: 3.2%;
+    --n: 4;
+    --cell: calc((100% - var(--gap) * (var(--n) + 1)) / var(--n));
+    --step: calc(var(--cell) + var(--gap));
+    --fs: 9cqw;
+    --r-cell: 3.4cqw;
+    container-type: size;
+    padding: var(--gap);
+    border-radius: var(--r-board);
+    /* рамка приглушена: тонкая линия вместо градиентного неона */
+    border: 1px solid rgba(138,146,166,.2);
+    background: rgba(255,255,255,.028);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 18px 48px rgba(0,0,0,.45);
+  }
+  .cell, .tile {
+    position: absolute; width: var(--cell); height: var(--cell);
+    border-radius: var(--r-cell);
+    display: flex; align-items: center; justify-content: center;
+  }
+  /* пустая клетка — видимая лунка, иначе сетка пропадает */
+  .cell {
+    background: rgba(255,255,255,.045);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.03);
+  }
+  .tile {
+    font-weight: 700; font-variant-numeric: tabular-nums;
+    letter-spacing: -.03em;
+    font-size: var(--fs);
+    color: var(--ink);
+    transition: transform .1s var(--ease), opacity .1s linear;
+    will-change: transform; backface-visibility: hidden;
+  }
+  /* кегль по числу знаков, а не одной ступенькой */
+  .tile.d3 { font-size: calc(var(--fs) * .84); }
+  .tile.d4 { font-size: calc(var(--fs) * .66); }
+  .tile.d5 { font-size: calc(var(--fs) * .54); }
+  .tile.pop { animation: pop .15s var(--ease); }
+  .tile.merged { animation: merged .2s var(--ease); }
+  @keyframes pop { from { transform: scale(.4); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+  @keyframes merged {
+    0% { transform: scale(1) } 45% { transform: scale(1.14) } 100% { transform: scale(1) }
+  }
+
+  /* всплывающие очки за ход */
+  .gain {
+    position: absolute; right: var(--s3); top: 6%;
+    font-weight: 700; font-size: 18px; color: var(--accent);
+    text-shadow: 0 0 12px rgba(0,229,255,.6);
+    pointer-events: none; animation: gain .7s var(--ease) forwards;
+  }
+  @keyframes gain {
+    0%   { opacity: 0; transform: translateY(6px) }
+    18%  { opacity: 1; transform: translateY(0) }
+    100% { opacity: 0; transform: translateY(-22px) }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tile { transition: none } .tile.pop, .tile.merged, .gain { animation: none }
+    .gain { display: none }
+  }
+
+  /* ---- нижняя панель: в зоне большого пальца ---- */
+  .dock {
+    width: 100%; max-width: 460px;
+    display: flex; align-items: center; gap: var(--s2);
+  }
+  /* вспомогательные действия не должны быть ярче игры */
+  .dock button {
+    flex: 0 0 var(--tap); min-width: var(--tap); padding: 0;
+    background: rgba(255,255,255,.022);
+    border-color: rgba(138,146,166,.16);
+    color: var(--text-dim); font-weight: 500;
+  }
+  .dock button:active:enabled { color: var(--text); background: var(--surface); }
+  @media (hover: hover) and (pointer: fine) {
+    .dock button:hover:enabled { color: var(--text); background: var(--surface); }
+  }
+  .dock .wide { flex: 1 1 auto; }
+  .icon {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 17px; line-height: 1;
+  }
+  #btn-menu i {
+    display: block; width: 17px; height: 2px; border-radius: 2px;
+    background: currentColor; box-shadow: 0 -5px 0 currentColor, 0 5px 0 currentColor;
+  }
+
+  /* ---- экраны: плавно, а не рывком ---- */
+  .screen {
+    position: absolute; inset: 0; border-radius: var(--r-board); z-index: 3;
+    /* плотная подложка: сквозь меню не должно просвечивать поле */
+    background: linear-gradient(170deg, #0E111A 0%, #090A10 55%, #0C0916 100%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: var(--s4); text-align: center; padding: var(--s5) var(--s4);
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transform: scale(.99);
+    transition: opacity .18s var(--ease), transform .18s var(--ease), visibility .18s;
+    overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y;
+  }
+  .screen.show { opacity: 1; visibility: visible; pointer-events: auto; transform: scale(1); }
+  .wordmark {
+    font-weight: 800; letter-spacing: -.035em; line-height: .88;
+    font-size: clamp(46px, 17vw, 80px);
+    background: linear-gradient(104deg, var(--accent), var(--accent-deep));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 0 18px rgba(0,229,255,.35));
+  }
+  .screen h2 { margin: 0; font-size: clamp(19px, 5.4vw, 26px); font-weight: 700; letter-spacing: -.02em; }
+  /* «Закрыть» и «Назад» тоже контейнеры, а не висящий текст */
+  #menu-back, #modes-back {
+    background: var(--surface); border-color: var(--line);
+    color: var(--text); min-width: 160px;
+  }
+  #menu-back:active:enabled, #modes-back:active:enabled,
+  #menu-back:hover:enabled, #modes-back:hover:enabled {
+    background: var(--surface-2); border-color: var(--line-strong);
+  }
+  .screen p {
+    margin: 0; font-family: var(--font-sub);
+    font-size: clamp(11.5px, 3.3vw, 12.5px); line-height: 1.65;
+    color: var(--text-dim); max-width: 30ch;
+  }
+  .screen .row { display: flex; gap: var(--s2); flex-wrap: wrap; justify-content: center; }
+  /* стартовый экран: контейнеры подсвечиваются при наведении (мышь) и при касании (тач) */
+  #start .row button {
+    background: var(--surface); border-color: var(--line);
+    transition: transform .12s var(--ease), border-color .16s, box-shadow .16s, background .16s;
+  }
+  #start .row button:active:enabled {
+    border-color: var(--accent); background: var(--surface-2);
+    box-shadow: 0 0 0 1px var(--accent) inset, 0 0 18px rgba(0,229,255,.28);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    #start .row button:hover:enabled {
+      border-color: var(--accent); background: var(--surface-2);
+      box-shadow: 0 0 0 1px var(--accent) inset, 0 0 18px rgba(0,229,255,.28);
+    }
+  }
+  /* крупная плитка-итог на экране конца партии */
+  .trophy {
+    width: 84px; height: 84px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 26px; letter-spacing: -.03em; color: var(--ink);
+  }
+
+  .list { width: 100%; max-width: 320px; display: flex; flex-direction: column; gap: var(--s2); }
+  .item {
+    width: 100%; text-align: left; min-height: 62px; padding: var(--s2) var(--s4);
+    display: flex; flex-direction: column; justify-content: center; gap: 3px;
+    background: var(--surface); border: 1px solid var(--line);
+    transition: transform .12s var(--ease), border-color .16s, box-shadow .16s, background .16s;
+  }
+  .item:active:enabled {
+    background: var(--surface-2); border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent) inset, 0 0 18px rgba(0,229,255,.24);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .item:hover:enabled {
+      background: var(--surface-2); border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent) inset, 0 0 18px rgba(0,229,255,.24);
+    }
+  }
+  .item b { font-size: 15px; font-weight: 600; }
+  .item em {
+    font-style: normal; font-family: var(--font-sub);
+    font-size: 10.5px; color: var(--text-dim);
+  }
+  .item.active { border-color: var(--accent); background: var(--surface-2); }
+  .item.active b { color: var(--accent); }
+  /* опасное действие отделено и подсвечивается красным, а не акцентом */
+  .item.danger { border-color: rgba(255,110,130,.3); margin-top: var(--s2); }
+  .item.danger b { color: #FF8A9B; }
+  .item.danger:active:enabled,
+  .item.danger:hover:enabled {
+    border-color: #FF6E82; background: rgba(255,110,130,.08);
+    box-shadow: 0 0 0 1px #FF6E82 inset, 0 0 18px rgba(255,110,130,.22);
+  }
+
+  #tut .art {
+    width: 124px; height: 124px; border-radius: 14px; flex: 0 0 auto;
+    border: 1px solid var(--line); position: relative; overflow: hidden;
+    background: rgba(255,255,255,.025);
+  }
+  #tut .art .t {
+    position: absolute; width: 50px; height: 50px; border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 18px; letter-spacing: -.03em; color: var(--ink);
+    transition: transform .45s var(--ease), opacity .3s;
+  }
+  #tut .dots { display: flex; gap: 6px; }
+  #tut .dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--line-strong); transition: all .2s; }
+  #tut .dots i.on { width: 16px; border-radius: 3px; background: var(--accent); }
+
+  @media (max-height: 640px) {
+    #app { gap: var(--s2); }
+    .screen { gap: var(--s3); }
+  }
+  @media (orientation: landscape) and (max-height: 500px) {
+    #app { flex-direction: row; align-items: center; gap: var(--s4); }
+    #side { display: flex; flex-direction: column; gap: var(--s3); width: 196px; flex: 0 0 196px; }
+    header, .dock { max-width: none; }
+    header { flex-wrap: wrap; }
+    .scores { margin-left: 0; }
+  }
+  #side { display: contents; }
+</style>
+</head>
+<body>
+<div class="glow a"></div>
+<div class="glow b"></div>
+<div id="app">
+  <div id="side">
+    <header>
+      <div class="mark">2048</div>
+      <div class="scores">
+        <div class="score"><span>Счёт</span><b id="score">0</b></div>
+        <div class="score"><span>Рекорд</span><b id="best">0</b></div>
+      </div>
+    </header>
+    <div class="progress"><i id="progress-fill"></i></div>
+  </div>
+
+  <div id="stage">
+    <div id="board">
+      <div class="screen" id="start">
+        <div class="wordmark">2048</div>
+        <p id="start-sub">Сдвигай плитки, складывай одинаковые</p>
+        <button class="primary" id="btn-play">Играть</button>
+        <div class="row">
+          <button id="btn-continue" style="display:none">Продолжить партию</button>
+          <button id="btn-modes">Режимы</button>
+          <button id="btn-tut">Как играть</button>
+        </div>
+      </div>
+
+      <div class="screen" id="modes">
+        <h2>Режим</h2>
+        <div class="list" id="mode-list"></div>
+        <button class="quiet" id="modes-back">Назад</button>
+      </div>
+
+      <div class="screen" id="menu">
+        <h2>Меню</h2>
+        <div class="list">
+          <button class="item" id="m-modes"><b>Режимы</b><em id="m-modes-sub">—</em></button>
+          <button class="item" id="m-tut"><b>Как играть</b><em>правила за три шага</em></button>
+          <button class="item" id="m-sound"><b>Звук</b><em id="m-sound-sub">включён</em></button>
+          <button class="item" id="m-vibro"><b>Вибрация</b><em id="m-vibro-sub">включена</em></button>
+          <button class="item danger" id="m-new"><b>Начать заново</b><em>текущая партия будет сброшена</em></button>
+        </div>
+        <button class="quiet" id="menu-back">Закрыть</button>
+      </div>
+
+      <div class="screen" id="tut">
+        <div class="art" id="tut-art"></div>
+        <h2 id="tut-title"></h2>
+        <p id="tut-text"></p>
+        <div class="dots" id="tut-dots"></div>
+        <div class="row">
+          <button class="primary" id="tut-next"></button>
+          <button class="quiet" id="tut-skip">Пропустить</button>
+        </div>
+      </div>
+
+      <div class="screen" id="overlay">
+        <div class="trophy" id="ov-trophy" style="display:none"></div>
+        <h2 id="ov-title"></h2>
+        <p id="ov-text"></p>
+        <div class="row">
+          <button class="primary" id="ov-btn"></button>
+          <button class="quiet" id="ov-alt" style="display:none"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dock">
+    <button id="btn-menu" class="icon" aria-label="Меню"><i></i></button>
+    <button id="btn-undo" class="wide" disabled>Отменить ход</button>
+    <button id="btn-sound" class="icon" aria-label="Звук">🔊</button>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+// ====================== CONFIG ======================
+const CONFIG = {
+  modes: {
+    classic:  { name: 'Классика',  desc: 'поле 4×4, цель 2048, отмена хода',   size: 4, goal: 2048, undoDepth: 1 },
+    hardcore: { name: 'Хардкор',   desc: 'поле 4×4, цель 2048, без отмены',    size: 4, goal: 2048, undoDepth: 0 },
+    wide:     { name: 'Простор',   desc: 'поле 5×5, цель 4096, отмена хода',   size: 5, goal: 4096, undoDepth: 1 },
+    sprint:   { name: 'Спринт',    desc: 'поле 3×3, цель 256, быстрая партия', size: 3, goal: 256,  undoDepth: 1 }
+  },
+  defaultMode: 'classic',
+  startTiles: 2,
+  // канон: каждая новая плитка независимо 2 с шансом 90% или 4 с шансом 10%
+  spawn: [ { value: 2, weight: 90 }, { value: 4, weight: 10 } ],
+  moveMs: 100,
+  swipe: { minPx: 18, minRatio: 0.035, axisBias: 1.15, maxMs: 900 },
+  vibro: { move: 0, merge: 14, win: [30, 40, 60], over: [60, 50, 120] },
+  fontScale: { 3: 1.35, 4: 1, 5: 0.78 },
+  saveKey: 'game2048.neon.v3',
+  tiles: {
+    2:    { bg: '#343D52', ink: '#E4ECFA', glow: 0    },
+    4:    { bg: '#465A85', ink: '#F0F6FF', glow: 0.06 },
+    8:    { bg: '#12A2BC', ink: '#04252C', glow: 0.22 },
+    16:   { bg: '#00C9E6', ink: '#03222A', glow: 0.36 },
+    32:   { bg: '#00E5FF', ink: '#032027', glow: 0.48 },
+    64:   { bg: '#3D8BFF', ink: '#F4F9FF', glow: 0.58 },
+    128:  { bg: '#6E5BFF', ink: '#F5F3FF', glow: 0.66 },
+    256:  { bg: '#A03BFF', ink: '#FAF1FF', glow: 0.72 },
+    512:  { bg: '#DC2BFF', ink: '#FEF2FF', glow: 0.80 },
+    1024: { bg: '#FF2D9B', ink: '#FFF0F7', glow: 0.88 },
+    2048: { bg: '#FF6A3A', ink: '#2A0B03', glow: 0.94 },
+    4096: { bg: '#FFB020', ink: '#2A1C03', glow: 0.97 },
+    high: { bg: '#FFE24D', ink: '#2A2403', glow: 1.00 }
+  },
+  sound: {
+    move:  { freq: 220, to: 180, dur: 0.07, gain: 0.055, type: 'triangle' },
+    merge: { freq: 420, to: 780, dur: 0.13, gain: 0.085, type: 'sine' },
+    spawn: { freq: 660, to: 660, dur: 0.05, gain: 0.03,  type: 'sine' },
+    tap:   { freq: 520, to: 520, dur: 0.05, gain: 0.035, type: 'sine' },
+    win:   [523, 659, 784, 1047],
+    over:  [330, 262, 196]
+  }
+};
+
+const TUTORIAL = [
+  { title: 'Сдвигай',      text: 'Свайп в любую сторону по экрану. Все плитки едут до упора одновременно.', demo: 'slide' },
+  { title: 'Складывай',    text: 'Две одинаковые плитки сталкиваются и дают одну, вдвое больше. Её значение идёт в счёт.', demo: 'merge' },
+  { title: 'Собирай цель', text: 'После каждого хода появляется новая плитка — 2 или, реже, 4. Партия кончается, когда сдвинуть нечего.', demo: 'goal' }
+];
+// ====================================================
+
+// ============ ЯДРО: чистые функции над моделью ============
+// Модель — матрица cells[r][c] = { id, value } | null. DOM ничего не решает.
+
+// Сжатие линии. Индекс 0 — сторона, в которую едут плитки.
+function collapseLine(line) {
+  const src = line.filter(Boolean);
+  const out = [], events = [];
+  let i = 0, gained = 0;
+  while (i < src.length) {
+    const a = src[i], b = src[i + 1];
+    if (b && b.value === a.value) {
+      // канон: плитка сливается один раз за ход, результат больше не участвует
+      out.push({ id: a.id, value: a.value * 2 });
+      events.push({ type: 'merge', keep: a.id, gone: b.id, slot: out.length - 1 });
+      gained += a.value * 2;
+      i += 2;
+    } else {
+      out.push(a);
+      events.push({ type: 'move', keep: a.id, slot: out.length - 1 });
+      i += 1;
+    }
+  }
+  return { out, events, gained };
+}
+
+// dir: 0 вверх, 1 вправо, 2 вниз, 3 влево
+function lineCoords(dir, index, n) {
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    if (dir === 3) out.push([index, k]);
+    else if (dir === 1) out.push([index, n - 1 - k]);
+    else if (dir === 0) out.push([k, index]);
+    else out.push([n - 1 - k, index]);
+  }
+  return out;
+}
+
+function applyMove(cells, dir, n) {
+  const next = Array.from({ length: n }, () => Array(n).fill(null));
+  const moves = [], merges = [];
+  let gained = 0, moved = false;
+
+  for (let index = 0; index < n; index++) {
+    const coords = lineCoords(dir, index, n);
+    const line = coords.map(([r, c]) => cells[r][c]);
+    const res = collapseLine(line);
+    gained += res.gained;
+
+    res.out.forEach((tile, slot) => {
+      const [r, c] = coords[slot];
+      next[r][c] = tile;
+    });
+
+    for (const ev of res.events) {
+      const [r, c] = coords[ev.slot];
+      const from = coords.findIndex(([rr, cc]) => {
+        const t = cells[rr][cc];
+        return t && t.id === ev.keep;
+      });
+      if (from !== ev.slot) moved = true;
+      moves.push({ id: ev.keep, r, c });
+      if (ev.type === 'merge') {
+        moved = true;
+        merges.push({ keep: ev.keep, gone: ev.gone, r, c });
+      }
+    }
+  }
+  return { next, moves, merges, gained, moved };
+}
+
+function coreHasMoves(cells, n) {
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    const t = cells[r][c];
+    if (!t) return true;
+    if (c + 1 < n && cells[r][c + 1] && cells[r][c + 1].value === t.value) return true;
+    if (r + 1 < n && cells[r + 1][c] && cells[r + 1][c].value === t.value) return true;
+  }
+  return false;
+}
+// =========================================================
+
+const store = {
+  // JSON.parse ждёт строку; некоторые реализации storage.get отдают уже
+  // разобранный объект вместо документированной строки — обрабатываем оба случая.
+  parse(v) {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'object') return v;
+    try { return JSON.parse(v); } catch (e) { return null; }
+  },
+  async get(key) {
+    try {
+      if (gemBridge.available) {
+        const r = await gemBridge.bridge.storage.get({ key });
+        return this.parse(r && r.value);
+      }
+      if (window.storage && window.storage.get) {
+        const r = await window.storage.get(key);
+        return this.parse(r && r.value);
+      }
+      return this.parse(localStorage.getItem(key));
+    } catch (e) { return null; }
+  },
+  async set(key, value) {
+    try {
+      const raw = JSON.stringify(value);
+      if (gemBridge.available) { await gemBridge.bridge.storage.set({ key, value: raw }); return; }
+      if (window.storage && window.storage.set) { await window.storage.set(key, raw); return; }
+      localStorage.setItem(key, raw);
+    } catch (e) {}
+  }
+};
+
+const audio = {
+  ctx: null, on: true,
+  init() {
+    if (this.ctx) return;
+    try { const AC = window.AudioContext || window.webkitAudioContext; if (AC) this.ctx = new AC(); }
+    catch (e) { this.ctx = null; }
+  },
+  resume() {
+    this.init();
+    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+  },
+  blip(cfg, delay) {
+    if (!this.on || !this.ctx || !cfg) return;
+    try {
+      const t = this.ctx.currentTime + (delay || 0);
+      const osc = this.ctx.createOscillator(), gain = this.ctx.createGain();
+      osc.type = cfg.type || 'sine';
+      osc.frequency.setValueAtTime(cfg.freq, t);
+      if (cfg.to !== cfg.freq) osc.frequency.exponentialRampToValueAtTime(cfg.to, t + cfg.dur);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(cfg.gain, t + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + cfg.dur);
+      osc.connect(gain).connect(this.ctx.destination);
+      osc.start(t); osc.stop(t + cfg.dur + 0.02);
+    } catch (e) {}
+  },
+  arpeggio(freqs, step) {
+    freqs.forEach((f, i) => this.blip({ freq: f, to: f, dur: 0.16, gain: 0.07, type: 'sine' }, i * (step || 0.11)));
+  }
+};
+
+const haptic = {
+  on: true,
+  supported: typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function',
+  hit(p) { if (!this.on || !this.supported || !p) return; try { navigator.vibrate(p); } catch (e) {} }
+};
+
+// ---------- мост с Gem Space (необязателен — вне их вебвью просто отсутствует) ----------
+// SDK грузим сами, а не тегом в разметке: тег <script src> блокирует выполнение
+// остального кода, пока не ответит сеть, и при недоступном CDN игра просто не стартует.
+// Здесь же — жёсткий таймаут: если ответа нет вовремя, идём дальше без моста.
+function loadScript(src, timeoutMs) {
+  return new Promise(resolve => {
+    let done = false;
+    const finish = ok => { if (done) return; done = true; resolve(ok); };
+    try {
+      const el = document.createElement('script');
+      el.src = src;
+      el.onload = () => finish(true);
+      el.onerror = () => finish(false);
+      document.head.appendChild(el);
+      setTimeout(() => finish(false), timeoutMs);
+    } catch (e) { finish(false); }
+  });
+}
+
+// то же самое для самих вызовов моста: если хост подключён, но не отвечает,
+// игра не должна зависать — берём то, что успело прийти, и едем дальше
+function withTimeout(promise, ms, fallback) {
+  return new Promise(resolve => {
+    let settled = false;
+    const timer = setTimeout(() => { if (!settled) { settled = true; resolve(fallback); } }, ms);
+    Promise.resolve(promise).then(
+      v => { if (!settled) { settled = true; clearTimeout(timer); resolve(v); } },
+      () => { if (!settled) { settled = true; clearTimeout(timer); resolve(fallback); } }
+    );
+  });
+}
+
+const gemBridge = {
+  available: false,
+  bridge: null,
+  async init() {
+    // если хост уже положил объект моста на страницу нативно — сеть вообще не нужна
+    if (typeof GemSpaceBridge === 'undefined' || !GemSpaceBridge.bridge) {
+      const loaded = await loadScript(
+        'https://cdn.jsdelivr.net/npm/@gemspace/gem-bridge-sdk/index.global.js', 1500
+      );
+      if (!loaded || typeof GemSpaceBridge === 'undefined' || !GemSpaceBridge.bridge) return;
+    }
+    this.bridge = GemSpaceBridge.bridge;
+    const initData = await withTimeout(this.bridge.app.init(), 1500, null);
+    if (initData) {
+      this.available = true;
+      applyGemViewport(initData);
+    } else {
+      // мост есть, но не ответил вовремя — работаем как автономная веб-страница
+      this.available = false;
+    }
+  },
+  // обязательный вызов: без него Gem Space может счесть мини-апп незагрузившимся
+  async ready() {
+    if (!this.available) return;
+    await withTimeout(this.bridge.app.ready(), 1500, null);
+  }
+};
+
+// безопасные зоны от реального вьюпорта Gem Space поверх стандартных env()
+function applyGemViewport(initData) {
+  const vp = initData && initData.viewport;
+  if (!vp) return;
+  const root = document.documentElement.style;
+  if (typeof vp.safeAreaTop === 'number') root.setProperty('--gem-safe-top', vp.safeAreaTop + 'px');
+  if (typeof vp.safeAreaBottom === 'number') root.setProperty('--gem-safe-bottom', vp.safeAreaBottom + 'px');
+}
+
+const $ = id => document.getElementById(id);
+const app = $('app'), board = $('board');
+const screens = { start: $('start'), modes: $('modes'), menu: $('menu'), tut: $('tut'), overlay: $('overlay') };
+const scoreEl = $('score'), bestEl = $('best');
+const btnUndo = $('btn-undo'), btnSound = $('btn-sound'), btnMenu = $('btn-menu');
+
+let mode = CONFIG.defaultMode, M = CONFIG.modes[mode], N = M.size;
+let state = 'menu';
+let cells = [];                 // модель
+let els = new Map();            // id -> DOM-элемент
+let nextId = 1;
+let score = 0, bestByMode = {}, history = [];
+let locked = false, goalReached = false;
+let pendingRun = null, seenTutorial = false;
+let tutStep = 0, tutFrom = 'start';
+
+function best() { return bestByMode[mode] || 0; }
+function styleOf(value) { return CONFIG.tiles[value] || CONFIG.tiles.high; }
+function emptyCells() { return Array.from({ length: N }, () => Array(N).fill(null)); }
+
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${Math.min(a, 1).toFixed(3)})`;
+}
+function shade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  const cl = v => Math.max(0, Math.min(255, v + amt));
+  return `rgb(${cl((n >> 16) & 255)}, ${cl((n >> 8) & 255)}, ${cl(n & 255)})`;
+}
+
+function buildCells() {
+  board.querySelectorAll('.cell').forEach(el => el.remove());
+  board.style.setProperty('--n', N);
+  board.style.setProperty('--fs', (9 * (CONFIG.fontScale[N] || 1)).toFixed(2) + 'cqw');
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const d = document.createElement('div');
+    d.className = 'cell';
+    place(d, r, c);
+    board.insertBefore(d, screens.start);
+  }
+}
+
+function place(el, r, c) {
+  el.style.left = `calc(var(--gap) + var(--step) * ${c})`;
+  el.style.top  = `calc(var(--gap) + var(--step) * ${r})`;
+}
+
+function paintEl(el, value) {
+  const s = styleOf(value);
+  const g = s.glow;
+  el.textContent = value;
+  el.style.background = `radial-gradient(130% 130% at 32% 18%, ${shade(s.bg, 14)}, ${shade(s.bg, -16)})`;
+  el.style.color = s.ink;
+  el.style.boxShadow = g > 0
+    ? `0 0 ${(12 + g * 30).toFixed(0)}px ${hexA(s.bg, 0.3 + g * 0.5)}, inset 0 1px 0 ${hexA('#FFFFFF', 0.1 + g * 0.22)}`
+    : 'inset 0 1px 0 rgba(255,255,255,.1), 0 2px 8px rgba(0,0,0,.35)';
+  el.style.textShadow = g > 0.4 ? `0 0 ${(6 + g * 10).toFixed(0)}px ${hexA(s.bg, g * 0.55)}` : 'none';
+  const d = String(value).length;
+  el.classList.remove('d3', 'd4', 'd5');
+  if (d === 3) el.classList.add('d3');
+  else if (d === 4) el.classList.add('d4');
+  else if (d >= 5) el.classList.add('d5');
+}
+
+function makeEl(tile, r, c, animate) {
+  const el = document.createElement('div');
+  el.className = 'tile';
+  paintEl(el, tile.value);
+  place(el, r, c);
+  if (animate) el.classList.add('pop');
+  board.insertBefore(el, screens.start);
+  els.set(tile.id, el);
+  return el;
+}
+
+/* Приведение DOM к модели. Единственный источник истины — cells.
+   Любой элемент без плитки в модели удаляется, любая плитка без элемента создаётся.
+   Именно это делает невозможным появление «лишней» плитки на экране. */
+function syncView(animateNew) {
+  const alive = new Set();
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const t = cells[r][c];
+    if (!t) continue;
+    alive.add(t.id);
+    let el = els.get(t.id);
+    if (!el) { makeEl(t, r, c, animateNew); continue; }
+    place(el, r, c);
+    if (el.textContent !== String(t.value)) paintEl(el, t.value);
+  }
+  for (const [id, el] of els) {
+    if (!alive.has(id)) { el.remove(); els.delete(id); }
+  }
+}
+
+function clearBoard() {
+  els.forEach(el => el.remove());
+  els.clear();
+  cells = emptyCells();
+}
+
+function spawnTile(animate) {
+  const free = [];
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (!cells[r][c]) free.push([r, c]);
+  if (!free.length) return null;
+  const [r, c] = free[Math.floor(Math.random() * free.length)];
+  const total = CONFIG.spawn.reduce((s, o) => s + o.weight, 0);
+  let roll = Math.random() * total, value = CONFIG.spawn[0].value;
+  for (const s of CONFIG.spawn) { roll -= s.weight; if (roll <= 0) { value = s.value; break; } }
+  const tile = { id: nextId++, value };
+  cells[r][c] = tile;
+  makeEl(tile, r, c, animate);
+  if (animate) audio.blip(CONFIG.sound.spawn);
+  return tile;
+}
+
+function maxValue() {
+  let m = 0;
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const t = cells[r][c];
+    if (t && t.value > m) m = t.value;
+  }
+  return m;
+}
+
+function snapshot() {
+  return { mode, score, goalReached, cells: cells.map(row => row.map(t => t ? t.value : 0)) };
+}
+
+function restore(snap) {
+  clearBoard();
+  score = snap.score;
+  goalReached = !!snap.goalReached;
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const v = snap.cells[r][c];
+    if (v) cells[r][c] = { id: nextId++, value: v };
+  }
+  syncView(false);
+  updateHud();
+}
+
+function updateHud() {
+  scoreEl.textContent = score;
+  bestEl.textContent = best();
+  btnUndo.style.display = M.undoDepth > 0 ? '' : 'none';
+  btnUndo.disabled = history.length === 0 || state !== 'playing';
+  const top = maxValue();
+  const steps = Math.log2(M.goal) - 1;
+  const done = top >= 2 ? Math.log2(top) - 1 : 0;
+  $('progress-fill').style.width = Math.max(0, Math.min(100, (done / steps) * 100)).toFixed(1) + '%';
+}
+
+function flashScore(gained) {
+  scoreEl.classList.remove('bump'); void scoreEl.offsetWidth; scoreEl.classList.add('bump');
+  setTimeout(() => scoreEl.classList.remove('bump'), 200);
+  const g = document.createElement('div');
+  g.className = 'gain';
+  g.textContent = '+' + gained;
+  board.appendChild(g);
+  setTimeout(() => g.remove(), 750);
+}
+
+// ---------- ход ----------
+function move(dir) {
+  if (locked || state !== 'playing') return;
+
+  const res = applyMove(cells, dir, N);
+  // канон: если ничего не сдвинулось и не слилось — хода не было, новая плитка не появляется
+  if (!res.moved) return;
+
+  const prev = snapshot();
+
+  // плитки, которые исчезают, доезжают до цели и гаснут
+  for (const m of res.merges) {
+    const el = els.get(m.gone);
+    if (el) {
+      place(el, m.r, m.c);
+      el.style.opacity = '0';
+      els.delete(m.gone);
+      setTimeout(() => el.remove(), CONFIG.moveMs);
+    }
+  }
+  // выжившие плитки едут на новые места
+  for (const m of res.moves) {
+    const el = els.get(m.id);
+    if (el) place(el, m.r, m.c);
+  }
+
+  cells = res.next;
+  score += res.gained;
+  if (res.gained) flashScore(res.gained);
+  if (score > best()) bestByMode[mode] = score;
+
+  if (res.merges.length) { audio.blip(CONFIG.sound.merge); haptic.hit(CONFIG.vibro.merge); }
+  else { audio.blip(CONFIG.sound.move); haptic.hit(CONFIG.vibro.move); }
+
+  if (M.undoDepth > 0) {
+    history.push(prev);
+    while (history.length > M.undoDepth) history.shift();
+  }
+
+  locked = true;
+  setTimeout(() => {
+    // новое значение слитых плиток проявляется по приезде
+    for (const m of res.merges) {
+      const el = els.get(m.keep);
+      if (!el) continue;
+      const t = cells[m.r] && cells[m.r][m.c];
+      if (t) paintEl(el, t.value);
+      el.classList.remove('merged'); void el.offsetWidth; el.classList.add('merged');
+    }
+    spawnTile(true);
+    syncView(true);          // страховка: картинка всегда равна модели
+    locked = false;
+    updateHud();
+    save();
+    checkEnd();
+  }, CONFIG.moveMs);
+
+  updateHud();
+}
+
+function checkEnd() {
+  if (!goalReached && maxValue() >= M.goal) {
+    goalReached = true; state = 'won';
+    if (audio.on) audio.arpeggio(CONFIG.sound.win);
+    haptic.hit(CONFIG.vibro.win);
+    showOverlay('Цель собрана', 'Счёт ' + score + '. Плитки растут дальше — можно не останавливаться.',
+      'Играть дальше', () => { hideAll(); state = 'playing'; updateHud(); },
+      'Начать заново', () => startNew(), M.goal);
+    save(); return;
+  }
+  if (!coreHasMoves(cells, N)) {
+    state = 'gameover';
+    const rec = score >= best() ? 'Это твой лучший результат.' : 'Лучший результат — ' + best() + '.';
+    if (audio.on) audio.arpeggio(CONFIG.sound.over, 0.14);
+    haptic.hit(CONFIG.vibro.over);
+    showOverlay('Ходов больше нет', 'Счёт ' + score + '. ' + rec,
+      'Сыграть ещё', () => startNew(), 'Сменить режим', () => showScreen('modes'), maxValue());
+    save();
+  }
+}
+
+// ---------- экраны ----------
+function hideAll() { Object.values(screens).forEach(s => s.classList.remove('show')); }
+
+function showScreen(name) {
+  hideAll();
+  if (name === 'modes') renderModes();
+  if (name === 'menu') renderMenu();
+  screens[name].classList.add('show');
+  if (state === 'playing') state = 'screen';
+}
+
+function showOverlay(title, text, btn, onClick, altLabel, onAlt, trophyValue) {
+  hideAll();
+  $('ov-title').textContent = title;
+  $('ov-text').textContent = text;
+  const tr = $('ov-trophy');
+  if (trophyValue) {
+    const s = styleOf(trophyValue);
+    tr.textContent = trophyValue;
+    tr.style.display = '';
+    tr.style.background = s.bg;
+    tr.style.color = s.ink;
+    tr.style.boxShadow = `0 0 ${(12 + s.glow * 28).toFixed(0)}px ${hexA(s.bg, 0.3 + s.glow * 0.45)}`;
+  } else tr.style.display = 'none';
+  const b = $('ov-btn'), a = $('ov-alt');
+  b.textContent = btn; b.onclick = onClick;
+  if (altLabel) { a.textContent = altLabel; a.onclick = onAlt; a.style.display = ''; }
+  else a.style.display = 'none';
+  screens.overlay.classList.add('show');
+}
+
+function showStart() {
+  state = 'menu';
+  $('btn-continue').style.display = pendingRun ? '' : 'none';
+  $('start-sub').textContent = M.name + ' · ' + M.desc;
+  hideAll();
+  screens.start.classList.add('show');
+  updateHud();
+}
+
+function renderModes() {
+  const list = $('mode-list');
+  list.innerHTML = '';
+  for (const key of Object.keys(CONFIG.modes)) {
+    const m = CONFIG.modes[key];
+    const b = document.createElement('button');
+    b.className = 'item' + (key === mode ? ' active' : '');
+    const rec = bestByMode[key] || 0;
+    b.innerHTML = '<b></b><em></em>';
+    b.querySelector('b').textContent = m.name;
+    b.querySelector('em').textContent = m.desc + (rec ? ' · рекорд ' + rec : '');
+    b.onclick = () => selectMode(key);
+    list.appendChild(b);
+  }
+}
+
+function renderMenu() {
+  $('m-modes-sub').textContent = M.name + ' · ' + M.desc;
+  $('m-sound-sub').textContent = audio.on ? 'включён' : 'выключен';
+  $('m-vibro-sub').textContent = haptic.supported ? (haptic.on ? 'включена' : 'выключена') : 'недоступна на этом устройстве';
+  $('m-vibro').disabled = !haptic.supported;
+}
+
+function selectMode(key) {
+  audio.blip(CONFIG.sound.tap);
+  mode = key; M = CONFIG.modes[mode]; N = M.size;
+  if (pendingRun && pendingRun.mode !== mode) pendingRun = null;
+  clearBoard();
+  buildCells();
+  startNew();
+}
+
+function requestNew() {
+  if (score > 0 && (state === 'playing' || state === 'screen' || state === 'won')) {
+    showOverlay('Сбросить партию?', 'Счёт ' + score + ' не сохранится. Рекорд останется.',
+      'Начать заново', () => startNew(),
+      'Отмена', () => { hideAll(); state = 'playing'; updateHud(); });
+    return;
+  }
+  startNew();
+}
+
+// ---------- туториал ----------
+function showTutorial(from) { tutFrom = from || 'start'; tutStep = 0; renderTutorial(); showScreen('tut'); }
+
+function renderTutorial() {
+  const step = TUTORIAL[tutStep];
+  $('tut-title').textContent = step.title;
+  $('tut-text').textContent = step.text;
+  $('tut-next').textContent = tutStep === TUTORIAL.length - 1 ? 'Понятно' : 'Дальше';
+  $('tut-skip').style.display = tutStep === TUTORIAL.length - 1 ? 'none' : '';
+  const dots = $('tut-dots');
+  dots.innerHTML = '';
+  TUTORIAL.forEach((_, i) => { const d = document.createElement('i'); if (i === tutStep) d.className = 'on'; dots.appendChild(d); });
+  drawTutorialArt(step.demo);
+}
+
+function drawTutorialArt(kind) {
+  const art = $('tut-art');
+  art.innerHTML = '';
+  const mk = (value, left, top) => {
+    const el = document.createElement('div');
+    el.className = 't';
+    el.textContent = value;
+    el.style.left = left + 'px'; el.style.top = top + 'px';
+    const s = styleOf(value);
+    el.style.background = s.bg; el.style.color = s.ink;
+    if (s.glow > 0) el.style.boxShadow = `0 0 ${(8 + s.glow * 20).toFixed(0)}px ${hexA(s.bg, 0.25 + s.glow * 0.4)}`;
+    art.appendChild(el);
+    return el;
+  };
+  if (kind === 'slide') {
+    const a = mk(2, 11, 37);
+    requestAnimationFrame(() => { a.style.transform = 'translateX(52px)'; });
+  } else if (kind === 'merge') {
+    const a = mk(2, 11, 37), b = mk(2, 63, 37);
+    requestAnimationFrame(() => {
+      a.style.transform = 'translateX(52px)';
+      setTimeout(() => {
+        a.style.opacity = '0';
+        const s = styleOf(4);
+        b.textContent = '4'; b.style.background = s.bg; b.style.color = s.ink;
+        b.style.transform = 'scale(1.14)';
+        setTimeout(() => { b.style.transform = 'scale(1)'; }, 160);
+      }, 450);
+    });
+  } else {
+    mk(8, 11, 11); mk(32, 63, 11); mk(128, 11, 63); mk(512, 63, 63);
+  }
+}
+
+function finishTutorial() {
+  seenTutorial = true; save();
+  if (tutFrom === 'menu') { showScreen('menu'); return; }
+  showStart();
+}
+
+// ---------- партия ----------
+function undo() {
+  if (!history.length || M.undoDepth === 0) return;
+  const snap = history.pop();
+  state = 'playing';
+  hideAll();
+  restore(snap);
+  save();
+}
+
+function startNew() {
+  audio.resume();
+  hideAll();
+  clearBoard();
+  score = 0; goalReached = false; history = []; pendingRun = null;
+  state = 'playing';
+  for (let i = 0; i < CONFIG.startTiles; i++) spawnTile(true);
+  syncView(false);
+  updateHud();
+  save();
+}
+
+function continueRun() {
+  audio.resume();
+  hideAll();
+  restore(pendingRun);
+  state = 'playing';
+  history = [];
+  updateHud();
+  if (!coreHasMoves(cells, N)) checkEnd();
+}
+
+function save() {
+  store.set(CONFIG.saveKey, {
+    bestByMode, mode, sound: audio.on, vibro: haptic.on, seenTutorial,
+    run: (state === 'playing' || state === 'won' || state === 'screen') ? snapshot() : null
+  });
+}
+
+// проверка сохранённой партии: только степени двойки, только нужный размер
+function validRun(run) {
+  if (!run || !Array.isArray(run.cells) || run.cells.length !== N) return false;
+  if (run.mode !== mode) return false;
+  for (const row of run.cells) {
+    if (!Array.isArray(row) || row.length !== N) return false;
+    for (const v of row) {
+      if (v === 0) continue;
+      if (typeof v !== 'number' || v < 2 || (v & (v - 1)) !== 0) return false;
+    }
+  }
+  return typeof run.score === 'number' && run.score >= 0;
+}
+
+async function load() {
+  await gemBridge.init();       // до отрисовки — вдруг платформа передаст safe area/тему
+  const data = await store.get(CONFIG.saveKey);
+  bestByMode = (data && data.bestByMode && typeof data.bestByMode === 'object') ? data.bestByMode : {};
+  audio.on = !(data && data.sound === false);
+  haptic.on = !(data && data.vibro === false);
+  seenTutorial = !!(data && data.seenTutorial);
+  btnSound.textContent = audio.on ? '🔊' : '🔇';
+  if (data && data.mode && CONFIG.modes[data.mode]) { mode = data.mode; M = CONFIG.modes[mode]; N = M.size; }
+  buildCells();
+  cells = emptyCells();
+  pendingRun = (data && validRun(data.run)) ? data.run : null;
+  if (!seenTutorial) showTutorial('start');
+  else showStart();
+  gemBridge.ready();            // интерфейс отрисован — сообщаем платформе, что мини-апп готов
+}
+
+// ---------- ввод ----------
+const KEYS = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3, w: 0, d: 1, s: 2, a: 3, 'ц': 0, 'в': 1, 'ы': 2, 'ф': 3 };
+window.addEventListener('keydown', e => {
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (state !== 'playing') {
+    if (k === 'Escape') { hideAll(); if (els.size) { state = 'playing'; updateHud(); } else showStart(); }
+    return;
+  }
+  if (k in KEYS) { e.preventDefault(); audio.resume(); move(KEYS[k]); return; }
+  if (k === 'r') requestNew();
+  if (k === 'z') undo();
+});
+
+let sx = 0, sy = 0, st = 0, tracking = false;
+function swipeThreshold() {
+  const short = Math.min(window.innerWidth, window.innerHeight);
+  return Math.max(CONFIG.swipe.minPx, short * CONFIG.swipe.minRatio);
+}
+function onStart(x, y, target) {
+  if (target && target.closest && target.closest('button, .screen.show')) { tracking = false; return; }
+  sx = x; sy = y; st = Date.now(); tracking = true;
+}
+function onEnd(x, y) {
+  if (!tracking) return;
+  tracking = false;
+  if (Date.now() - st > CONFIG.swipe.maxMs) return;
+  const dx = x - sx, dy = y - sy, ax = Math.abs(dx), ay = Math.abs(dy);
+  if (Math.max(ax, ay) < swipeThreshold()) return;
+  if (Math.max(ax, ay) < Math.min(ax, ay) * CONFIG.swipe.axisBias) return;
+  audio.resume();
+  if (ax > ay) move(dx > 0 ? 1 : 3); else move(dy > 0 ? 2 : 0);
+}
+
+app.addEventListener('touchstart', e => {
+  const t = e.changedTouches[0];
+  onStart(t.clientX, t.clientY, e.target);
+  if (tracking) e.preventDefault();
+}, { passive: false });
+app.addEventListener('touchmove', e => { if (tracking) e.preventDefault(); }, { passive: false });
+app.addEventListener('touchend', e => { const t = e.changedTouches[0]; onEnd(t.clientX, t.clientY); }, { passive: false });
+app.addEventListener('touchcancel', () => { tracking = false; });
+app.addEventListener('mousedown', e => onStart(e.clientX, e.clientY, e.target));
+window.addEventListener('mouseup', e => onEnd(e.clientX, e.clientY));
+
+let lastTap = 0;
+document.addEventListener('touchend', e => {
+  const now = Date.now();
+  if (now - lastTap < 320) e.preventDefault();
+  lastTap = now;
+}, { passive: false });
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+window.addEventListener('pagehide', save);
+
+// ---------- кнопки ----------
+$('btn-play').addEventListener('click', startNew);
+$('btn-continue').addEventListener('click', continueRun);
+$('btn-modes').addEventListener('click', () => showScreen('modes'));
+$('btn-tut').addEventListener('click', () => showTutorial('start'));
+$('modes-back').addEventListener('click', () => {
+  if (els.size && state !== 'menu') { hideAll(); state = 'playing'; updateHud(); } else showStart();
+});
+btnMenu.addEventListener('click', () => { audio.resume(); audio.blip(CONFIG.sound.tap); showScreen('menu'); });
+$('menu-back').addEventListener('click', () => {
+  if (els.size) { hideAll(); state = 'playing'; updateHud(); } else showStart();
+});
+$('m-new').addEventListener('click', requestNew);
+$('m-modes').addEventListener('click', () => showScreen('modes'));
+$('m-tut').addEventListener('click', () => showTutorial('menu'));
+$('m-sound').addEventListener('click', () => { toggleSound(); renderMenu(); });
+$('m-vibro').addEventListener('click', () => {
+  haptic.on = !haptic.on;
+  if (haptic.on) haptic.hit(CONFIG.vibro.merge);
+  save(); renderMenu();
+});
+$('tut-next').addEventListener('click', () => {
+  audio.resume(); audio.blip(CONFIG.sound.tap);
+  if (tutStep < TUTORIAL.length - 1) { tutStep++; renderTutorial(); } else finishTutorial();
+});
+$('tut-skip').addEventListener('click', finishTutorial);
+btnUndo.addEventListener('click', undo);
+btnSound.addEventListener('click', toggleSound);
+
+function toggleSound() {
+  audio.init();
+  audio.on = !audio.on;
+  btnSound.textContent = audio.on ? '🔊' : '🔇';
+  if (audio.on) { audio.resume(); audio.blip(CONFIG.sound.tap); }
+  save();
+}
+
+// самопроверка ядра: открыть страницу с #test
+if (location.hash === '#test') {
+  const T = (() => { let i = 1; return v => v ? { id: i++, value: v } : null; })();
+  const gr = rows => rows.map(row => row.map(T));
+  const vals = g => g.map(row => row.map(t => t ? t.value : 0));
+  const cases = [
+    ['три в ряд влево', vals(applyMove(gr([[2,2,2,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]]), 3, 4).next)[0], [4,2,0,0]],
+    ['четыре в ряд влево', vals(applyMove(gr([[2,2,2,2],[0,0,0,0],[0,0,0,0],[0,0,0,0]]), 3, 4).next)[0], [4,4,0,0]],
+    ['без повторного слияния', vals(applyMove(gr([[4,0,2,2],[0,0,0,0],[0,0,0,0],[0,0,0,0]]), 3, 4).next)[0], [4,4,0,0]],
+    ['упор в стену — не ход', applyMove(gr([[2,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]]), 3, 4).moved, false]
+  ];
+  const report = cases.map(([n, got, want]) =>
+    (JSON.stringify(got) === JSON.stringify(want) ? 'ok   ' : 'ОШИБКА ') + n).join('\n');
+  console.log(report);
+}
+
+load();
+})();
+
+</script>
+</body>
+</html>
