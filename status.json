@@ -1,5 +1,5 @@
 {
-"maintenance": true,
+  "maintenance": false,
   "version": "1.0.0",
   "title": "Идёт обновление",
   "message": "Игра скоро вернётся. Обычно это занимает несколько минут."
