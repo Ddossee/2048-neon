@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#07070B">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -98,7 +98,7 @@
 
   /* ---- шапка: приоритет у счёта, не у логотипа ---- */
   header {
-    width: 100%; max-width: 460px;
+    width: 100%; max-width: var(--ui-width, 460px);
     display: flex; align-items: center; gap: var(--s3);
   }
   .mark {
@@ -125,7 +125,7 @@
 
   /* прогресс к цели: видно, насколько близко, без чтения цифр */
   .progress {
-    width: 100%; max-width: 460px; height: 3px;
+    width: 100%; max-width: var(--ui-width, 460px); height: 3px;
     border-radius: 2px; overflow: hidden;
     background: rgba(255,255,255,.055);
     margin-top: calc(var(--s3) * -1 + 2px);
@@ -213,7 +213,10 @@
     letter-spacing: -.03em;
     font-size: var(--fs);
     color: var(--ink);
-    transition: transform .1s var(--ease), opacity .1s linear;
+    /* left/top обязаны быть в transition: позиция задаётся именно ими.
+       transform не используем для позиции — он занят анимациями scale (pop/merged). */
+    transition: left .1s var(--ease), top .1s var(--ease),
+                transform .1s var(--ease), opacity .1s linear;
     will-change: transform; backface-visibility: hidden;
   }
   /* кегль по числу знаков, а не одной ступенькой */
@@ -247,7 +250,7 @@
 
   /* ---- нижняя панель: в зоне большого пальца ---- */
   .dock {
-    width: 100%; max-width: 460px;
+    width: 100%; max-width: var(--ui-width, 460px);
     display: flex; align-items: center; gap: var(--s2);
   }
   /* вспомогательные действия не должны быть ярче игры */
@@ -273,11 +276,15 @@
 
   /* ---- экраны: плавно, а не рывком ---- */
   .screen {
-    position: absolute; inset: 0; border-radius: var(--r-board); z-index: 3;
+    /* на всю высоту приложения, а не внутри поля: меню из шести пунктов
+       выше игровой доски, и внутри неё список приходилось скроллить */
+    position: fixed; inset: 0; border-radius: 0; z-index: 10;
     /* плотная подложка: сквозь меню не должно просвечивать поле */
     background: linear-gradient(170deg, #0E111A 0%, #090A10 55%, #0C0916 100%);
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: var(--s4); text-align: center; padding: var(--s5) var(--s4);
+    gap: var(--s4); text-align: center;
+    padding: calc(env(safe-area-inset-top) + var(--s5)) var(--s4)
+             calc(env(safe-area-inset-bottom) + var(--s5));
     opacity: 0; visibility: hidden; pointer-events: none;
     transform: scale(.99);
     transition: opacity .18s var(--ease), transform .18s var(--ease), visibility .18s;
@@ -387,6 +394,10 @@
     #app { gap: var(--s2); }
     .screen { gap: var(--s3); }
   }
+  /* обычная (портретная) раскладка: обёртка растворяется, шапка и док —
+     прямые дети #app и тянутся на всю доступную ширину.
+     Объявлено ДО медиазапроса: специфичность одинаковая, побеждает последнее правило. */
+  #side { display: contents; }
   @media (orientation: landscape) and (max-height: 500px) {
     #app { flex-direction: row; align-items: center; gap: var(--s4); }
     #side { display: flex; flex-direction: column; gap: var(--s3); width: 196px; flex: 0 0 196px; }
@@ -394,7 +405,72 @@
     header { flex-wrap: wrap; }
     .scores { margin-left: 0; }
   }
-  #side { display: contents; }
+  /* всплывающее уведомление о достижении */
+  #toast {
+    position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 76px);
+    transform: translate(-50%, 12px); z-index: 20;
+    display: flex; flex-direction: column; gap: 2px; text-align: center;
+    padding: 10px 18px; border-radius: var(--r-ctl);
+    background: rgba(12,14,22,.96); border: 1px solid var(--accent);
+    box-shadow: 0 0 22px rgba(0,229,255,.28);
+    opacity: 0; pointer-events: none; max-width: 86vw;
+    transition: opacity .22s var(--ease), transform .22s var(--ease);
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #toast b { font-size: 14px; font-weight: 700; color: var(--accent); }
+  #toast em {
+    font-style: normal; font-family: var(--font-sub);
+    font-size: 10.5px; color: var(--text-dim);
+  }
+
+  /* остаток ходов в режиме с лимитом */
+  #moves-box { display: none; }
+  body.has-limit #moves-box { display: block; }
+
+  /* экран статистики */
+  .stat-grid {
+    width: 100%; max-width: 320px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: var(--s2);
+  }
+  .stat {
+    border: 1px solid var(--line); border-radius: var(--r-ctl);
+    background: var(--surface); padding: 10px 12px; text-align: left;
+  }
+  .stat span {
+    display: block; font-family: var(--font-sub);
+    font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim);
+  }
+  .stat b { font-size: 17px; font-variant-numeric: tabular-nums; }
+  .ach-list {
+    width: 100%; max-width: 320px; display: flex; flex-direction: column; gap: 6px;
+    text-align: left;
+  }
+  .ach {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; border-radius: var(--r-ctl);
+    border: 1px solid var(--line); background: var(--surface);
+    opacity: .45;
+  }
+  .ach.got { opacity: 1; border-color: var(--accent); box-shadow: 0 0 14px rgba(0,229,255,.16); }
+  .ach i {
+    flex: 0 0 22px; height: 22px; border-radius: 6px;
+    background: rgba(255,255,255,.07);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-style: normal; color: var(--text-dim);
+  }
+  .ach.got i { background: var(--accent); color: var(--ink); }
+  .ach div { min-width: 0; }
+  .ach b { display: block; font-size: 13px; font-weight: 600; }
+  .ach em {
+    display: block; font-style: normal; font-family: var(--font-sub);
+    font-size: 10px; color: var(--text-dim);
+  }
+  /* на стартовом экране шапка и прогресс не нужны — счёта ещё нет.
+     место под них сохраняется, чтобы поле не подпрыгивало при старте партии. */
+  body.at-start header,
+  body.at-start .progress,
+  body.at-tutorial header,
+  body.at-tutorial .progress { visibility: hidden; }
 </style>
 </head>
 <body>
@@ -407,13 +483,14 @@
       <div class="scores">
         <div class="score"><span>Счёт</span><b id="score">0</b></div>
         <div class="score"><span>Рекорд</span><b id="best">0</b></div>
+        <div class="score" id="moves-box"><span>Ходы</span><b id="moves-left">0</b></div>
       </div>
     </header>
     <div class="progress"><i id="progress-fill"></i></div>
   </div>
 
   <div id="stage">
-    <div id="board">
+    <div id="board" role="application" aria-label="Игровое поле 2048. Свайп или стрелки для хода.">
       <div class="screen" id="start">
         <div class="wordmark">2048</div>
         <button class="primary" id="btn-play">Играть</button>
@@ -434,12 +511,27 @@
         <h2>Меню</h2>
         <div class="list">
           <button class="item" id="m-modes"><b>Режимы</b><em id="m-modes-sub">—</em></button>
-          <button class="item" id="m-tut"><b>Как играть</b><em>правила за три шага</em></button>
+          <button class="item" id="m-stats"><b>Статистика</b><em id="m-stats-sub">Партии, плитки, достижения.</em></button>
+          <button class="item" id="m-tut"><b>Как играть</b><em>Правила за три шага.</em></button>
           <button class="item" id="m-sound"><b>Звук</b><em id="m-sound-sub">включён</em></button>
           <button class="item" id="m-vibro"><b>Вибрация</b><em id="m-vibro-sub">включена</em></button>
-          <button class="item danger" id="m-new"><b>Начать заново</b><em>текущая партия будет сброшена</em></button>
+          <button class="item danger" id="m-new"><b>Начать заново</b><em>Текущая партия будет сброшена.</em></button>
         </div>
         <button class="quiet" id="menu-back">Закрыть</button>
+      </div>
+
+      <div class="screen" id="stats">
+        <h2>Статистика</h2>
+        <div class="stat-grid">
+          <div class="stat"><span>Партий</span><b id="st-games">0</b></div>
+          <div class="stat"><span>Лучшая плитка</span><b id="st-tile">—</b></div>
+          <div class="stat"><span>Средний счёт</span><b id="st-avg">0</b></div>
+          <div class="stat"><span>Всего ходов</span><b id="st-moves">0</b></div>
+          <div class="stat"><span>В игре</span><b id="st-time">0 с</b></div>
+          <div class="stat"><span>Достижений</span><b id="st-ach">0</b></div>
+        </div>
+        <div class="ach-list" id="ach-list"></div>
+        <button class="quiet" id="stats-back">Назад</button>
       </div>
 
       <div class="screen" id="tut">
@@ -465,6 +557,8 @@
     </div>
   </div>
 
+  <div id="toast" role="status" aria-live="polite"></div>
+
   <div class="dock">
     <button id="btn-menu" class="icon" aria-label="Меню"><i></i></button>
     <button id="btn-undo" class="wide" disabled>Отменить ход</button>
@@ -482,7 +576,8 @@ const CONFIG = {
     classic:  { name: 'Классика',  desc: 'поле 4×4, цель 2048, отмена хода',   size: 4, goal: 2048, undoDepth: 1 },
     hardcore: { name: 'Хардкор',   desc: 'поле 4×4, цель 2048, без отмены',    size: 4, goal: 2048, undoDepth: 0 },
     wide:     { name: 'Простор',   desc: 'поле 5×5, цель 4096, отмена хода',   size: 5, goal: 4096, undoDepth: 1 },
-    sprint:   { name: 'Спринт',    desc: 'поле 3×3, цель 256, быстрая партия', size: 3, goal: 256,  undoDepth: 1 }
+    sprint:   { name: 'Спринт',    desc: 'поле 3×3, цель 256, быстрая партия', size: 3, goal: 256,  undoDepth: 1 },
+    limited:  { name: '50 ходов',  desc: 'собери максимум за 50 ходов',        size: 4, goal: 2048, undoDepth: 0, moveLimit: 50 }
   },
   defaultMode: 'classic',
   startTiles: 2,
@@ -513,10 +608,37 @@ const CONFIG = {
     merge: { freq: 420, to: 780, dur: 0.13, gain: 0.085, type: 'sine' },
     spawn: { freq: 660, to: 660, dur: 0.05, gain: 0.03,  type: 'sine' },
     tap:   { freq: 520, to: 520, dur: 0.05, gain: 0.035, type: 'sine' },
+    achieve: [784, 988, 1319],
     win:   [523, 659, 784, 1047],
     over:  [330, 262, 196]
   }
 };
+
+/* ---------- достижения ----------
+   Проверяются по событиям, а не сканированием состояния: так честно
+   отслеживаются «сто ходов в одной партии» и «партия без отмены». */
+const ACHIEVEMENTS = [
+  { id: 'tile128',  title: 'Сто двадцать восемь', desc: 'собрать плитку 128',
+    test: c => c.top >= 128 },
+  { id: 'tile512',  title: 'Пятьсот двенадцать',  desc: 'собрать плитку 512',
+    test: c => c.top >= 512 },
+  { id: 'tile1024', title: 'Тысяча',              desc: 'собрать плитку 1024',
+    test: c => c.top >= 1024 },
+  { id: 'tile2048', title: 'Цель достигнута',     desc: 'собрать плитку 2048',
+    test: c => c.top >= 2048 },
+  { id: 'score5k',  title: 'Пять тысяч',          desc: 'набрать 5000 очков за партию',
+    test: c => c.score >= 5000 },
+  { id: 'moves100', title: 'Долгая партия',       desc: '100 ходов в одной партии',
+    test: c => c.moves >= 100 },
+  { id: 'bigmerge', title: 'Крупное слияние',     desc: 'получить 128 очков одним ходом',
+    test: c => c.gain >= 128 },
+  { id: 'nohelp',   title: 'Без подстраховки',    desc: 'доиграть партию, ни разу не отменив ход',
+    test: c => c.event === 'end' && !c.undoUsed && c.moves >= 30 },
+  { id: 'sprintWin',title: 'Спринтер',            desc: 'собрать 256 в режиме Спринт',
+    test: c => c.mode === 'sprint' && c.top >= 256 },
+  { id: 'limited256', title: 'Экономный',         desc: 'собрать 256 за 50 ходов',
+    test: c => c.mode === 'limited' && c.top >= 256 }
+];
 
 const TUTORIAL = [
   { title: 'Сдвигай',      text: 'Свайп в любую сторону по экрану. Все плитки едут до упора одновременно.', demo: 'slide' },
@@ -743,9 +865,16 @@ function applyGemViewport(initData) {
   if (typeof vp.safeAreaBottom === 'number') root.setProperty('--gem-safe-bottom', vp.safeAreaBottom + 'px');
 }
 
-const $ = id => document.getElementById(id);
-const app = $('app'), board = $('board');
-const screens = { start: $('start'), modes: $('modes'), menu: $('menu'), tut: $('tut'), overlay: $('overlay') };
+// дата в UTC — используется как отметка, когда получено достижение
+function dateKeyUTC(d) {
+  const t = d || new Date();
+  const m = String(t.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(t.getUTCDate()).padStart(2, '0');
+  return t.getUTCFullYear() + '-' + m + '-' + day;   // UTC, чтобы день был общим для всех часовых поясов
+}
+
+const $ = id => document.getElementById(id);const app = $('app'), board = $('board');
+const screens = { start: $('start'), modes: $('modes'), menu: $('menu'), tut: $('tut'), stats: $('stats'), overlay: $('overlay') };
 const scoreEl = $('score'), bestEl = $('best');
 const btnUndo = $('btn-undo'), btnSound = $('btn-sound'), btnMenu = $('btn-menu');
 
@@ -757,9 +886,63 @@ let nextId = 1;
 let score = 0, bestByMode = {}, history = [];
 let locked = false, goalReached = false;
 let pendingRun = null, seenTutorial = false;
+let stats = { games: 0, sumScore: 0, bestTile: 0, timeMs: 0, moves: 0 };
+let achievements = {};        // { id: 'YYYY-MM-DD' } — когда получено
+let sessionStart = null;      // момент последнего учёта времени
+let movesThisGame = 0, undoUsedThisGame = false;
+let bestAtGameStart = 0;      // рекорд до начала партии: с ним сравниваем в финале
 let tutStep = 0, tutFrom = 'start';
 
 function best() { return bestByMode[mode] || 0; }
+
+/* Время считаем дельтами при каждом сохранении, а не «от старта до конца партии»:
+   иначе свёрнутое на ночь приложение намотало бы часы игры. */
+function tickTime() {
+  if (sessionStart === null) return;
+  const now = Date.now();
+  stats.timeMs += Math.max(0, now - sessionStart);
+  sessionStart = now;
+}
+
+function fmtTime(ms) {
+  const total = Math.floor(ms / 1000);
+  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60);
+  if (h > 0) return h + ' ч ' + m + ' мин';
+  if (m > 0) return m + ' мин';
+  return total + ' с';
+}
+
+// выдача достижений: возвращает список только что полученных
+function grantAchievements(ctx) {
+  const fresh = [];
+  for (const a of ACHIEVEMENTS) {
+    if (achievements[a.id]) continue;
+    let ok = false;
+    try { ok = !!a.test(ctx); } catch (e) { ok = false; }
+    if (ok) { achievements[a.id] = dateKeyUTC(); fresh.push(a); }
+  }
+  if (fresh.length) {
+    showAchievementToast(fresh[0], fresh.length - 1);
+    if (audio.on) audio.arpeggio(CONFIG.sound.achieve, 0.09);
+    haptic.hit(CONFIG.vibro.merge);
+    saveNow();
+  }
+  return fresh;
+}
+
+function showAchievementToast(a, more) {
+  const el = $('toast');
+  if (!el) return;
+  el.innerHTML = '';
+  const t = document.createElement('b');
+  t.textContent = a.title;
+  const d = document.createElement('em');
+  d.textContent = more > 0 ? a.desc + ' · и ещё ' + more : a.desc;
+  el.appendChild(t); el.appendChild(d);
+  el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+  clearTimeout(showAchievementToast.timer);
+  showAchievementToast.timer = setTimeout(() => el.classList.remove('show'), 2600);
+}
 function styleOf(value) { return CONFIG.tiles[value] || CONFIG.tiles.high; }
 function emptyCells() { return Array.from({ length: N }, () => Array(N).fill(null)); }
 
@@ -807,6 +990,8 @@ function fitBoard() {
   if (!side) return;
   board.style.width = side + 'px';
   board.style.height = side + 'px';
+  // шапка, прогресс и док равняются по краям поля, иначе визуально «уезжают внутрь»
+  document.documentElement.style.setProperty('--ui-width', side + 'px');
 }
 
 // пересчитываем при любом изменении геометрии: поворот, смена размера, адресная строка
@@ -892,13 +1077,21 @@ function maxValue() {
 }
 
 function snapshot() {
-  return { mode, score, goalReached, cells: cells.map(row => row.map(t => t ? t.value : 0)) };
+  return {
+    mode, score, goalReached,
+    cells: cells.map(row => row.map(t => t ? t.value : 0)),
+    // без этих полей лимит ходов обходился перезагрузкой страницы
+    moves: movesThisGame,
+    undoUsed: undoUsedThisGame
+  };
 }
 
 function restore(snap) {
   clearBoard();
   score = snap.score;
   goalReached = !!snap.goalReached;
+  if (typeof snap.moves === 'number') movesThisGame = snap.moves;
+  if (typeof snap.undoUsed === 'boolean') undoUsedThisGame = snap.undoUsed;
   for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
     const v = snap.cells[r][c];
     if (v) cells[r][c] = { id: nextId++, value: v };
@@ -908,9 +1101,17 @@ function restore(snap) {
 }
 
 function updateHud() {
+  // шапка и прогресс показываются только когда партия реально идёт
+  document.body.classList.toggle('at-start', state === 'menu');
   scoreEl.textContent = score;
   bestEl.textContent = best();
-  btnUndo.style.display = M.undoDepth > 0 ? '' : 'none';
+  // остаток ходов виден только в режиме с лимитом
+  document.body.classList.toggle('has-limit', !!M.moveLimit);
+  if (M.moveLimit) $('moves-left').textContent = Math.max(0, M.moveLimit - movesThisGame);
+  // в режимах без отмены кнопка скрыта, но место сохраняет:
+  // иначе бургер и звук стягиваются к левому краю дока
+  btnUndo.style.visibility = M.undoDepth > 0 ? '' : 'hidden';
+  btnUndo.style.pointerEvents = M.undoDepth > 0 ? '' : 'none';
   btnUndo.disabled = history.length === 0 || state !== 'playing';
   const top = maxValue();
   const steps = Math.log2(M.goal) - 1;
@@ -937,6 +1138,8 @@ function move(dir) {
   if (!res.moved) return;
 
   const prev = snapshot();
+  movesThisGame++;
+  stats.moves++;
 
   // плитки, которые исчезают, доезжают до цели и гаснут
   for (const m of res.merges) {
@@ -982,30 +1185,93 @@ function move(dir) {
     locked = false;
     updateHud();
     save();
+    // достижения по событию хода: крупное слияние, длинная партия, крупные плитки
+    grantAchievements({
+      event: 'move', mode, gain: res.gained, top: maxValue(),
+      score, moves: movesThisGame, undoUsed: undoUsedThisGame
+    });
     checkEnd();
   }, CONFIG.moveMs);
 
   updateHud();
 }
 
+/* Партию можно возобновить только если она не закончена: после game over
+   поле остаётся на экране, и раньше Escape или «Закрыть» возвращали state='playing'
+   на мёртвой доске — а в режиме с лимитом позволяли играть сверх лимита. */
+/* Партия, начатая и брошенная (новая игра, смена режима, закрытие вкладки),
+   тоже должна попасть в статистику — иначе выигранная и сброшенная партия исчезает. */
+function abandonGameIfAny() {
+  if (state !== 'playing' && state !== 'screen' && state !== 'won') return;
+  if (movesThisGame <= 0) { sessionStart = null; return; }
+  recordGameEnd();
+}
+
+function resumeIfAlive() {
+  if (state === 'gameover') { showStart(); return; }
+  if (M.moveLimit && movesThisGame >= M.moveLimit) { showStart(); return; }
+  if (!els.size || !coreHasMoves(cells, N)) { showStart(); return; }
+  hideAll();
+  state = 'playing';
+  updateHud();
+}
+
+/* Записываем итоги партии один раз: и для статистики, и для достижений.
+   Вызывается из всех ветвей конца партии, включая исчерпанный лимит ходов. */
+function recordGameEnd() {
+  tickTime();
+  sessionStart = null;
+  stats.games++;
+  stats.sumScore += score;
+  const top = maxValue();
+  if (top > stats.bestTile) stats.bestTile = top;
+  grantAchievements({
+    event: 'end', mode, gain: 0, top,
+    score, moves: movesThisGame, undoUsed: undoUsedThisGame
+  });
+}
+
 function checkEnd() {
+  // режим с лимитом: ходы кончились — партия закончена, даже если ходить ещё можно
+  if (M.moveLimit && movesThisGame >= M.moveLimit) {
+    state = 'gameover';
+    if (audio.on) audio.arpeggio(CONFIG.sound.over, 0.14);
+    haptic.hit(CONFIG.vibro.over);
+    recordGameEnd();
+    const rec = score > bestAtGameStart
+      ? 'Это твой лучший результат.'
+      : 'Лучший результат — ' + bestAtGameStart + '.';
+    showOverlay('Ходы закончились', 'Счёт ' + score + ' за ' + M.moveLimit + ' ходов. ' + rec,
+      'Сыграть ещё', () => startNew(), 'Сменить режим', () => showScreen('modes'), maxValue());
+    saveNow();
+    return;
+  }
   if (!goalReached && maxValue() >= M.goal) {
     goalReached = true; state = 'won';
     if (audio.on) audio.arpeggio(CONFIG.sound.win);
     haptic.hit(CONFIG.vibro.win);
-    showOverlay('Цель собрана', 'Счёт ' + score + '. Плитки растут дальше — можно не останавливаться.',
-      'Играть дальше', () => { hideAll(); state = 'playing'; updateHud(); },
-      'Начать заново', () => startNew(), M.goal);
-    save(); return;
+    // если ходов уже нет, «играть дальше» невозможно — говорим об этом сразу
+    const alive = coreHasMoves(cells, N);
+    showOverlay('Цель собрана',
+      'Счёт ' + score + (alive ? '. Плитки растут дальше — можно не останавливаться.' : '. Ходов больше нет.'),
+      alive ? 'Играть дальше' : 'Сыграть ещё',
+      alive ? (() => resumeIfAlive()) : (() => startNew()),
+      alive ? 'Начать заново' : 'Сменить режим',
+      alive ? (() => startNew()) : (() => showScreen('modes')), M.goal);
+    if (!alive) { state = 'gameover'; recordGameEnd(); }
+    saveNow(); return;
   }
   if (!coreHasMoves(cells, N)) {
     state = 'gameover';
-    const rec = score >= best() ? 'Это твой лучший результат.' : 'Лучший результат — ' + best() + '.';
     if (audio.on) audio.arpeggio(CONFIG.sound.over, 0.14);
     haptic.hit(CONFIG.vibro.over);
+    recordGameEnd();
+    const rec = score > bestAtGameStart
+      ? 'Это твой лучший результат.'
+      : 'Лучший результат — ' + bestAtGameStart + '.';
     showOverlay('Ходов больше нет', 'Счёт ' + score + '. ' + rec,
       'Сыграть ещё', () => startNew(), 'Сменить режим', () => showScreen('modes'), maxValue());
-    save();
+    saveNow();
   }
 }
 
@@ -1016,12 +1282,15 @@ function showScreen(name) {
   hideAll();
   if (name === 'modes') renderModes();
   if (name === 'menu') renderMenu();
+  if (name === 'stats') renderStats();
   screens[name].classList.add('show');
   if (state === 'playing') state = 'screen';
 }
 
 function showOverlay(title, text, btn, onClick, altLabel, onAlt, trophyValue) {
   hideAll();
+  // пока оверлей открыт, ходы не принимаются: иначе поле живёт за модалкой
+  if (state === 'playing') state = 'screen';
   $('ov-title').textContent = title;
   $('ov-text').textContent = text;
   const tr = $('ov-trophy');
@@ -1042,6 +1311,7 @@ function showOverlay(title, text, btn, onClick, altLabel, onAlt, trophyValue) {
 
 function showStart() {
   state = 'menu';
+  document.body.classList.add('at-start');
   $('btn-continue').style.display = pendingRun ? '' : 'none';
   hideAll();
   screens.start.classList.add('show');
@@ -1064,15 +1334,46 @@ function renderModes() {
   }
 }
 
+function renderStats() {
+  const avg = stats.games ? Math.round(stats.sumScore / stats.games) : 0;
+  $('st-games').textContent = stats.games;
+  $('st-tile').textContent = stats.bestTile || '—';
+  $('st-avg').textContent = avg;
+  $('st-moves').textContent = stats.moves;
+  $('st-time').textContent = fmtTime(stats.timeMs);
+  $('st-ach').textContent = Object.keys(achievements).length + ' / ' + ACHIEVEMENTS.length;
+
+  const list = $('ach-list');
+  list.innerHTML = '';
+  for (const a of ACHIEVEMENTS) {
+    const got = !!achievements[a.id];
+    const row = document.createElement('div');
+    row.className = 'ach' + (got ? ' got' : '');
+    const mark = document.createElement('i');
+    mark.textContent = got ? '✓' : '·';
+    const box = document.createElement('div');
+    const t = document.createElement('b'); t.textContent = a.title;
+    const d = document.createElement('em'); d.textContent = a.desc;
+    box.appendChild(t); box.appendChild(d);
+    row.appendChild(mark); row.appendChild(box);
+    list.appendChild(row);
+  }
+}
+
 function renderMenu() {
-  $('m-modes-sub').textContent = M.name + ' · ' + M.desc;
-  $('m-sound-sub').textContent = audio.on ? 'включён' : 'выключен';
-  $('m-vibro-sub').textContent = haptic.supported ? (haptic.on ? 'включена' : 'выключена') : 'недоступна на этом устройстве';
+  // подписи в меню — законченными фразами с точкой
+  $('m-modes-sub').textContent = M.name + ', ' + M.desc + '.';
+  $('m-sound-sub').textContent = audio.on ? 'Включён.' : 'Выключен.';
+  $('m-vibro-sub').textContent = haptic.supported
+    ? (haptic.on ? 'Включена.' : 'Выключена.')
+    : 'Недоступна на этом устройстве.';
   $('m-vibro').disabled = !haptic.supported;
 }
 
 function selectMode(key) {
   audio.blip(CONFIG.sound.tap);
+  // ===== #9 повторный выбор активного режима больше не стирает сохранёнку молча
+  if (key === mode && (state === 'playing' || state === 'screen')) { resumeIfAlive(); return; }
   mode = key; M = CONFIG.modes[mode]; N = M.size;
   if (pendingRun && pendingRun.mode !== mode) pendingRun = null;
   clearBoard();
@@ -1084,14 +1385,21 @@ function requestNew() {
   if (score > 0 && (state === 'playing' || state === 'screen' || state === 'won')) {
     showOverlay('Сбросить партию?', 'Счёт ' + score + ' не сохранится. Рекорд останется.',
       'Начать заново', () => startNew(),
-      'Отмена', () => { hideAll(); state = 'playing'; updateHud(); });
+      'Отмена', () => resumeIfAlive());
     return;
   }
   startNew();
 }
 
 // ---------- туториал ----------
-function showTutorial(from) { tutFrom = from || 'start'; tutStep = 0; renderTutorial(); showScreen('tut'); }
+function showTutorial(from) {
+  tutFrom = from || 'start';
+  tutStep = 0;
+  // на обучении счёт ещё не нужен — иначе «Счёт 0 / Рекорд 0» висит рядом с правилами
+  document.body.classList.add('at-tutorial');
+  renderTutorial();
+  showScreen('tut');
+}
 
 function renderTutorial() {
   const step = TUTORIAL[tutStep];
@@ -1141,6 +1449,7 @@ function drawTutorialArt(kind) {
 
 function finishTutorial() {
   seenTutorial = true; save();
+  document.body.classList.remove('at-tutorial');
   if (tutFrom === 'menu') { showScreen('menu'); return; }
   showStart();
 }
@@ -1148,6 +1457,10 @@ function finishTutorial() {
 // ---------- партия ----------
 function undo() {
   if (!history.length || M.undoDepth === 0) return;
+  undoUsedThisGame = true;
+  // откат хода откатывает и счётчики, иначе статистика и «100 ходов» завышаются
+  if (movesThisGame > 0) movesThisGame--;
+  if (stats.moves > 0) stats.moves--;
   const snap = history.pop();
   state = 'playing';
   hideAll();
@@ -1157,9 +1470,15 @@ function undo() {
 
 function startNew() {
   audio.resume();
+  // партия, брошенная на середине, всё равно попадает в статистику
+  abandonGameIfAny();
+  document.body.classList.remove('at-start');
   hideAll();
   clearBoard();
   score = 0; goalReached = false; history = []; pendingRun = null;
+  movesThisGame = 0; undoUsedThisGame = false;
+  bestAtGameStart = best();
+  sessionStart = Date.now();
   state = 'playing';
   for (let i = 0; i < CONFIG.startTiles; i++) spawnTile(true);
   syncView(false);
@@ -1169,7 +1488,10 @@ function startNew() {
 
 function continueRun() {
   audio.resume();
+  document.body.classList.remove('at-start');
   hideAll();
+  bestAtGameStart = best();
+  sessionStart = Date.now();
   restore(pendingRun);
   state = 'playing';
   history = [];
@@ -1177,9 +1499,20 @@ function continueRun() {
   if (!coreHasMoves(cells, N)) checkEnd();
 }
 
+/* Запись шла на каждый ход, плюс отдельная из grantAchievements.
+   Схлопываем частые вызовы, а важные моменты пишем немедленно через saveNow. */
+let saveTimer = null;
 function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveNow, 400);
+}
+
+function saveNow() {
+  clearTimeout(saveTimer);
+  tickTime();
   store.set(CONFIG.saveKey, {
     bestByMode, mode, sound: audio.on, vibro: haptic.on, seenTutorial,
+    stats, achievements,
     run: (state === 'playing' || state === 'won' || state === 'screen') ? snapshot() : null
   });
 }
@@ -1199,12 +1532,18 @@ function validRun(run) {
 }
 
 async function load() {
-  await gemBridge.init();       // до отрисовки — вдруг платформа передаст safe area/тему
+  /* Мост ждём с ограничением по времени, но саму отрисовку не задерживаем:
+     раньше await до buildCells() давал чёрный экран, если CDN висит. */
+  await withTimeout(gemBridge.init(), 1200, null);
   const data = await store.get(CONFIG.saveKey);
   bestByMode = (data && data.bestByMode && typeof data.bestByMode === 'object') ? data.bestByMode : {};
   audio.on = !(data && data.sound === false);
   haptic.on = !(data && data.vibro === false);
   seenTutorial = !!(data && data.seenTutorial);
+  if (data && data.stats && typeof data.stats === 'object') {
+    stats = Object.assign({ games: 0, sumScore: 0, bestTile: 0, timeMs: 0, moves: 0 }, data.stats);
+  }
+  achievements = (data && data.achievements && typeof data.achievements === 'object') ? data.achievements : {};
   btnSound.textContent = audio.on ? '🔊' : '🔇';
   if (data && data.mode && CONFIG.modes[data.mode]) { mode = data.mode; M = CONFIG.modes[mode]; N = M.size; }
   buildCells();
@@ -1222,10 +1561,11 @@ const KEYS = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3, w: 0, d: 1
 window.addEventListener('keydown', e => {
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   if (state !== 'playing') {
-    if (k === 'Escape') { hideAll(); if (els.size) { state = 'playing'; updateHud(); } else showStart(); }
+    if (k === 'Escape') resumeIfAlive();
     return;
   }
   if (k in KEYS) { e.preventDefault(); audio.resume(); move(KEYS[k]); return; }
+  if (k === 'Escape') { showScreen('menu'); return; }   // меню открывается и с клавиатуры
   if (k === 'r') requestNew();
   if (k === 'z') undo();
 });
@@ -1261,32 +1601,37 @@ app.addEventListener('touchcancel', () => { tracking = false; });
 app.addEventListener('mousedown', e => onStart(e.clientX, e.clientY, e.target));
 window.addEventListener('mouseup', e => onEnd(e.clientX, e.clientY));
 
+/* Раньше preventDefault на touchend отменял и синтетический click,
+   из-за чего при быстрых нажатиях терялось каждое второе касание кнопок.
+   Гасим двойной тап только вне интерактивных элементов. */
 let lastTap = 0;
 document.addEventListener('touchend', e => {
   const now = Date.now();
-  if (now - lastTap < 320) e.preventDefault();
+  const onControl = e.target && e.target.closest && e.target.closest('button, .item');
+  if (!onControl && now - lastTap < 320) e.preventDefault();
   lastTap = now;
 }, { passive: false });
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('contextmenu', e => e.preventDefault());
-document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
-window.addEventListener('pagehide', save);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { saveNow(); sessionStart = null; } // в фоне время не капает
+  else if (state === 'playing') sessionStart = Date.now();  // вернулись — отсчёт заново
+});
+window.addEventListener('pagehide', () => { abandonGameIfAny(); saveNow(); });
 
 // ---------- кнопки ----------
 $('btn-play').addEventListener('click', startNew);
 $('btn-continue').addEventListener('click', continueRun);
 $('btn-modes').addEventListener('click', () => showScreen('modes'));
 $('btn-tut').addEventListener('click', () => showTutorial('start'));
-$('modes-back').addEventListener('click', () => {
-  if (els.size && state !== 'menu') { hideAll(); state = 'playing'; updateHud(); } else showStart();
-});
+$('modes-back').addEventListener('click', resumeIfAlive);
 btnMenu.addEventListener('click', () => { audio.resume(); audio.blip(CONFIG.sound.tap); showScreen('menu'); });
-$('menu-back').addEventListener('click', () => {
-  if (els.size) { hideAll(); state = 'playing'; updateHud(); } else showStart();
-});
+$('menu-back').addEventListener('click', resumeIfAlive);
 $('m-new').addEventListener('click', requestNew);
 $('m-modes').addEventListener('click', () => showScreen('modes'));
+$('m-stats').addEventListener('click', () => showScreen('stats'));
 $('m-tut').addEventListener('click', () => showTutorial('menu'));
+$('stats-back').addEventListener('click', resumeIfAlive);
 $('m-sound').addEventListener('click', () => { toggleSound(); renderMenu(); });
 $('m-vibro').addEventListener('click', () => {
   haptic.on = !haptic.on;
