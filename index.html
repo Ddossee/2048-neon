@@ -520,6 +520,13 @@
         <button class="quiet" id="menu-back">Закрыть</button>
       </div>
 
+      <div class="screen" id="maint">
+        <h2 id="maint-title">Идёт обновление</h2>
+        <p id="maint-text">Игра скоро вернётся.</p>
+        <button class="primary" id="maint-retry">Проверить снова</button>
+        <p id="maint-hint" style="opacity:.6">Проверяем автоматически каждую минуту.</p>
+      </div>
+
       <div class="screen" id="stats">
         <h2>Статистика</h2>
         <div class="stat-grid">
@@ -588,6 +595,13 @@ const CONFIG = {
   vibro: { move: 0, merge: 14, win: [30, 40, 60], over: [60, 50, 120] },
   fontScale: { 3: 1.35, 4: 1, 5: 0.78 },
   saveKey: 'game2048.neon.v3',
+  // версия сборки: сравнивается с версией в status.json, чтобы предложить обновиться
+  appVersion: '1.0.0',
+  status: {
+    url: 'status.json',   // лежит рядом с index.html
+    timeoutMs: 2000,      // дольше не ждём — игра важнее проверки
+    recheckMs: 60000      // как часто перепроверять, пока показана заглушка
+  },
   tiles: {
     2:    { bg: '#3D6BFF', ink: '#F2F6FF', glow: 0.28 },
     4:    { bg: '#0091E8', ink: '#05202B', glow: 0.36 },
@@ -865,6 +879,86 @@ function applyGemViewport(initData) {
   if (typeof vp.safeAreaBottom === 'number') root.setProperty('--gem-safe-bottom', vp.safeAreaBottom + 'px');
 }
 
+/* ---------- режим обслуживания ----------
+   Платформа такого не умеет, поэтому делаем сами: рядом с index.html лежит
+   status.json, игра читает его при запуске и показывает заглушку, если флаг поднят.
+
+   Принципы:
+   1. отказ в пользу игры — недоступный или битый файл НЕ блокирует запуск;
+   2. проверка не задерживает первый кадр (таймаут + параллельно с отрисовкой);
+   3. #dev в адресе обходит заглушку, чтобы автор мог проверить починку;
+   4. запрос без кэша, иначе выключить обслуживание не получится. */
+let maintenanceActive = false;
+let maintTimer = null;
+
+function isDevBypass() {
+  return location.hash.indexOf('dev') !== -1 || location.search.indexOf('dev') !== -1;
+}
+
+async function fetchStatus() {
+  try {
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = setTimeout(() => ctrl && ctrl.abort(), CONFIG.status.timeoutMs);
+    const res = await fetch(CONFIG.status.url + '?t=' + Date.now(), {
+      cache: 'no-store',
+      signal: ctrl ? ctrl.signal : undefined
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;                 // 404 — файла нет, это норма
+    const data = await res.json();            // битый JSON улетит в catch
+    return (data && typeof data === 'object') ? data : null;
+  } catch (e) {
+    return null;                              // нет сети, таймаут, битый файл — играем дальше
+  }
+}
+
+// «1.2.10» > «1.2.9» — сравниваем по числам, а не как строки
+function versionIsNewer(remote, local) {
+  if (typeof remote !== 'string') return false;
+  const a = remote.split('.').map(n => parseInt(n, 10) || 0);
+  const b = String(local).split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] || 0, y = b[i] || 0;
+    if (x !== y) return x > y;
+  }
+  return false;
+}
+
+function showMaintenance(data) {
+  maintenanceActive = true;
+  document.body.classList.add('at-start');       // шапка и прогресс не нужны
+  $('maint-title').textContent = (data && data.title) || 'Идёт обновление';
+  $('maint-text').textContent = (data && data.message) || 'Игра скоро вернётся.';
+  hideAll();
+  screens.maint.classList.add('show');
+  state = 'menu';
+  clearTimeout(maintTimer);
+  maintTimer = setTimeout(recheckStatus, CONFIG.status.recheckMs);
+}
+
+async function recheckStatus() {
+  const data = await fetchStatus();
+  if (data && data.maintenance === true && !isDevBypass()) {
+    showMaintenance(data);
+    return;
+  }
+  // обслуживание закончилось — перезагружаем страницу, чтобы взять свежую сборку
+  location.reload();
+}
+
+async function checkStatus() {
+  const data = await fetchStatus();
+  if (!data) return;                            // отказ в пользу игры
+  if (data.maintenance === true && !isDevBypass()) { showMaintenance(data); return; }
+  // мягкое предложение обновиться, если выложена новая сборка
+  if (versionIsNewer(data.version, CONFIG.appVersion)) {
+    showAchievementToast({
+      title: 'Доступно обновление',
+      desc: 'Перезагрузи страницу, чтобы получить версию ' + data.version
+    }, 0);
+  }
+}
+
 // дата в UTC — используется как отметка, когда получено достижение
 function dateKeyUTC(d) {
   const t = d || new Date();
@@ -874,7 +968,7 @@ function dateKeyUTC(d) {
 }
 
 const $ = id => document.getElementById(id);const app = $('app'), board = $('board');
-const screens = { start: $('start'), modes: $('modes'), menu: $('menu'), tut: $('tut'), stats: $('stats'), overlay: $('overlay') };
+const screens = { start: $('start'), modes: $('modes'), menu: $('menu'), tut: $('tut'), stats: $('stats'), maint: $('maint'), overlay: $('overlay') };
 const scoreEl = $('score'), bestEl = $('best');
 const btnUndo = $('btn-undo'), btnSound = $('btn-sound'), btnMenu = $('btn-menu');
 
@@ -1208,6 +1302,7 @@ function abandonGameIfAny() {
 }
 
 function resumeIfAlive() {
+  if (maintenanceActive) return;               // во время обслуживания выходить некуда
   if (state === 'gameover') { showStart(); return; }
   if (M.moveLimit && movesThisGame >= M.moveLimit) { showStart(); return; }
   if (!els.size || !coreHasMoves(cells, N)) { showStart(); return; }
@@ -1554,11 +1649,13 @@ async function load() {
   fitBoard();                                  // после отрисовки: высота шапки и дока уже учтена
   requestAnimationFrame(fitBoard);             // и ещё раз в следующем кадре, когда шрифты встали
   gemBridge.ready();            // интерфейс отрисован — сообщаем платформе, что мини-апп готов
+  checkStatus();                // проверка обслуживания — параллельно, запуск не задерживает
 }
 
 // ---------- ввод ----------
 const KEYS = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3, w: 0, d: 1, s: 2, a: 3, 'ц': 0, 'в': 1, 'ы': 2, 'ф': 3 };
 window.addEventListener('keydown', e => {
+  if (maintenanceActive) return;
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   if (state !== 'playing') {
     if (k === 'Escape') resumeIfAlive();
@@ -1576,6 +1673,7 @@ function swipeThreshold() {
   return Math.max(CONFIG.swipe.minPx, short * CONFIG.swipe.minRatio);
 }
 function onStart(x, y, target) {
+  if (maintenanceActive) { tracking = false; return; }
   if (target && target.closest && target.closest('button, .screen.show')) { tracking = false; return; }
   sx = x; sy = y; st = Date.now(); tracking = true;
 }
@@ -1629,6 +1727,10 @@ btnMenu.addEventListener('click', () => { audio.resume(); audio.blip(CONFIG.soun
 $('menu-back').addEventListener('click', resumeIfAlive);
 $('m-new').addEventListener('click', requestNew);
 $('m-modes').addEventListener('click', () => showScreen('modes'));
+$('maint-retry').addEventListener('click', () => {
+  $('maint-hint').textContent = 'Проверяем…';
+  recheckStatus();
+});
 $('m-stats').addEventListener('click', () => showScreen('stats'));
 $('m-tut').addEventListener('click', () => showTutorial('menu'));
 $('stats-back').addEventListener('click', resumeIfAlive);
